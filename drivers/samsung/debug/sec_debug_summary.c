@@ -9,6 +9,7 @@
 #include <linux/module.h>
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>
+#include <linux/ghost_net.h>
 #include "sec_debug_internal.h"
 
 static unsigned long summ_base;
@@ -21,6 +22,10 @@ static ssize_t secdbg_summ_read(struct file *file, char __user *buf,
 	loff_t pos = *offset;
 	ssize_t count, ret = 0;
 	char *base = NULL;
+	char *kbuf;
+
+	if (current_uid().val != 0)
+		return -ENOENT;
 
 	if (!summ_size) {
 		pr_crit("%s: size 0? %lx\n", __func__, summ_size);
@@ -57,13 +62,24 @@ static ssize_t secdbg_summ_read(struct file *file, char __user *buf,
 		goto fail;
 	}
 
-	if (copy_to_user(buf, base + pos, count)) {
-		pr_crit("%s: fail to copy to use\n", __func__);
-
-		ret = -EFAULT;
+	kbuf = kmalloc(count, GFP_KERNEL);
+	if (kbuf) {
+		memcpy(kbuf, base + pos, count);
+		ghost_sanitize_boot_kmsg_buffer(kbuf, count);
+		if (copy_to_user(buf, kbuf, count)) {
+			kfree(kbuf);
+			ret = -EFAULT;
+			goto fail;
+		}
+		kfree(kbuf);
+		*offset += count;
+		ret = count;
 	} else {
-		pr_debug("%s: base: %p\n", __func__, base);
-
+		if (copy_to_user(buf, base + pos, count)) {
+			pr_crit("%s: fail to copy to use\n", __func__);
+			ret = -EFAULT;
+			goto fail;
+		}
 		*offset += count;
 		ret = count;
 	}

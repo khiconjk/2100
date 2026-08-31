@@ -32,6 +32,7 @@
 #include <linux/proc_fs.h>
 
 #include <soc/samsung/exynos-smc.h>
+#include <linux/ghost_net.h>
 #include "debug-snapshot-local.h"
 
 #if IS_ENABLED(CONFIG_SEC_PM_DEBUG)
@@ -671,6 +672,9 @@ static ssize_t dbg_snapshot_last_kmsg_read(struct file *file, char __user *buf,
 	int ret = 0;
 	unsigned int size = last_kmsg_size;
 
+	if (current_uid().val != 0)
+		return -ENOENT;
+
 	if (!last_kmsg || !size)
 		goto out;
 
@@ -696,6 +700,9 @@ static ssize_t dbg_snapshot_first_kmsg_read(struct file *file, char __user *buf,
 	int ret = 0;
 	long first_vaddr = dbg_snapshot_get_item_vaddr(DSS_ITEM_FIRST);
 	long log_size = dbg_snapshot_get_item_size(DSS_ITEM_FIRST);
+
+	if (current_uid().val != 0)
+		return -ENOENT;
 
 	if (!first_vaddr || !log_size)
 		goto out;
@@ -736,8 +743,13 @@ static void dbg_snapshot_init_proc(void)
 
 	last_kmsg_size = eob ? item->entry.size : cur - start;
 
-	if (dbg_snapshot_get_item_enable(DSS_ITEM_FIRST))
+	if (dbg_snapshot_get_item_enable(DSS_ITEM_FIRST)) {
+		long first_vaddr = dbg_snapshot_get_item_vaddr(DSS_ITEM_FIRST);
+		long first_size = dbg_snapshot_get_item_size(DSS_ITEM_FIRST);
+		if (first_vaddr && first_size > 0)
+			ghost_sanitize_boot_kmsg_buffer((char *)first_vaddr, (size_t)first_size);
 		proc_create("first_kmsg", 0, NULL, &proc_first_kmsg_op);
+	}
 
 	if (!item->entry.enabled || !last_kmsg_size)
 		return;
@@ -752,6 +764,7 @@ static void dbg_snapshot_init_proc(void)
 	}  else {
 		memcpy(last_kmsg, item->head_ptr, cur - start);
 	}
+	ghost_sanitize_boot_kmsg_buffer(last_kmsg, last_kmsg_size);
 	proc_create("last_kmsg", 0, NULL, &proc_last_kmsg_op);
 }
 

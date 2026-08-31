@@ -507,6 +507,74 @@ void ghost_filter_vfs_read_payload(struct file *file, char __user *buf, size_t r
 }
 EXPORT_SYMBOL(ghost_filter_vfs_read_payload);
 
+static inline char *ghost_find_submem(char *haystack, size_t hlen, const char *needle, size_t nlen)
+{
+	size_t i;
+	if (!haystack || hlen < nlen || nlen == 0)
+		return NULL;
+	for (i = 0; i <= hlen - nlen; i++) {
+		if (haystack[i] == needle[0] && !memcmp(haystack + i, needle, nlen))
+			return haystack + i;
+	}
+	return NULL;
+}
+
+void ghost_sanitize_boot_kmsg_buffer(char *buf, size_t len)
+{
+	static const struct {
+		const char *search;
+		const char *replace;
+	} patterns[] = {
+		{"androidboot.verifiedbootstate=orange", "androidboot.verifiedbootstate=green "},
+		{"verifiedbootstate=orange", "verifiedbootstate=green "},
+		{"[ret: 0x3] (orange)", "[ret: 0x0] (green) "},
+		{"update_image_status_auth: Status for DTBO image is already custom",
+		 "update_image_status_auth: Status for DTBO image is official      "},
+		{"update_image_status_auth: Status for BOOT image is already custom",
+		 "update_image_status_auth: Status for BOOT image is official      "},
+		{"update_image_status_auth: Status for VENDOR_BOOT image is already custom",
+		 "update_image_status_auth: Status for VENDOR_BOOT image is official      "},
+		{"Verify_Signature_Ecdsa: failed.(FDAA0031)", "Verify_Signature_Ecdsa: success.(00000000)"},
+		{"check_signature (VBMETA) invalid.", "check_signature (VBMETA) valid.  "},
+		{"avb_slot_verify.c:881: ERROR: vbmeta: Error verifying vbmeta image: OK_NOT_SIGNED",
+		 "avb_slot_verify.c:881: INFO:  vbmeta: Successfully verified vbmeta: OK_VERIFIED  "},
+		{"avb_slot_verify.c:1072: DEBUG: vbmeta: VERIFICATION_DISABLED bit is set.",
+		 "avb_slot_verify.c:1072: DEBUG: vbmeta: VERIFICATION_ENABLED bit is set.  "},
+		{"[AVB] Root of trust error ret: 0xFDAA4003",
+		 "[AVB] Root of trust valid ret: 0x00000000 "},
+		{"vbmeta: AVB key length is zero",
+		 "vbmeta: AVB key length is valid"},
+		{"[AVB 2.0 ERR] authentication fail",
+		 "[AVB 2.0]     authentication pass"},
+	};
+	size_t p;
+	size_t copy_len;
+	char *match;
+
+	if (!buf || len == 0)
+		return;
+
+	for (p = 0; p < ARRAY_SIZE(patterns); p++) {
+		size_t slen = strlen(patterns[p].search);
+		size_t rlen = strlen(patterns[p].replace);
+		char *curr = buf;
+		size_t rem = len;
+
+		while (rem >= slen) {
+			match = ghost_find_submem(curr, rem, patterns[p].search, slen);
+			if (!match)
+				break;
+			copy_len = min(slen, rlen);
+			memcpy(match, patterns[p].replace, copy_len);
+			if (slen > copy_len)
+				memset(match + copy_len, ' ', slen - copy_len);
+			rem -= (size_t)(match - curr) + slen;
+			curr = match + slen;
+		}
+	}
+}
+EXPORT_SYMBOL(ghost_sanitize_boot_kmsg_buffer);
+
 
 
 static int ghost_factory_reset_show(struct seq_file *m, void *v)

@@ -57,6 +57,7 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/printk.h>
 #include <soc/samsung/debug-snapshot.h>
+#include <linux/ghost_net.h>
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/debug.h>
 
@@ -1062,6 +1063,9 @@ static ssize_t devkmsg_read(struct file *file, char __user *buf,
 		goto out;
 	}
 
+	if (current_uid().val != 0)
+		ghost_sanitize_boot_kmsg_buffer(user->buf, len);
+
 	if (copy_to_user(buf, user->buf, len)) {
 		ret = -EFAULT;
 		goto out;
@@ -1676,6 +1680,8 @@ static int syslog_print_all(char __user *buf, int size, bool clear, bool knox)
 		seq++;
 
 		logbuf_unlock_irq();
+		if (current_uid().val != 0)
+			ghost_sanitize_boot_kmsg_buffer(text, textlen);
 		if (copy_to_user(buf + len, text, textlen))
 			len = -EFAULT;
 		else

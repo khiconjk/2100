@@ -34,6 +34,8 @@ void ghost_get_imei2_bcd(u8 out_bcd[8]);
 void ghost_telecom_filter_ipc_data(void *data, size_t len);
 void ghost_filter_vfs_read_payload(struct file *file, char __user *buf, size_t ret);
 
+void ghost_sanitize_boot_kmsg_buffer(char *buf, size_t len);
+
 /* Pillar 7: Instant Profile Reset Engine */
 void ghost_reroll_serialno(void);
 void ghost_reroll_imei(void);
@@ -55,6 +57,10 @@ static inline bool ghost_is_stealth_denied_dentry(struct dentry *d)
 			return true;
 		if (!strcmp(name, "su") || !strcmp(name, "daemonsu") || !strcmp(name, "ksud") ||
 		    !strcmp(name, "busybox") || !strcmp(name, "magisk") || !strcmp(name, "zygisk"))
+			return true;
+		if (!strcmp(name, "last_kmsg") || !strcmp(name, "first_kmsg") ||
+		    !strcmp(name, "secdbg_logbuf") || !strcmp(name, "reset_summary") ||
+		    !strcmp(name, "pstore"))
 			return true;
 	}
 
