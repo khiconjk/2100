@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
           submodules: false
@@ -111,7 +111,7 @@ jobs:
           ls -la toolchain/mkbootimg | head
 
       - name: Cache clang
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: toolchain/clang-r596125
           key: clang-r596125-linux-x86-stable-v2
@@ -181,6 +181,17 @@ jobs:
           echo "===== BUILD o1s KERNEL ====="
           bash build.sh -m o1s -k y -s y -r n 2>&1 | tee build.log
 
+      - name: Package Odin AP Flashable tar.md5
+        run: |
+          echo "===== PACKAGING ODIN TAR.MD5 ====="
+          cd build/out/o1s
+          if [ -f boot.img ] && [ -f dtbo.img ] && [ -f vendor_boot.img ]; then
+            tar -H ustar -c boot.img dtbo.img vendor_boot.img > boot-o1s-ghost-full.tar
+            md5sum -t boot-o1s-ghost-full.tar >> boot-o1s-ghost-full.tar
+            mv boot-o1s-ghost-full.tar boot-o1s-ghost-full.tar.md5
+            ls -lh boot-o1s-ghost-full.tar.md5
+          fi
+
       - name: Verify fresh outputs
         if: always()
         run: |
@@ -197,6 +208,7 @@ jobs:
           ls -lh build/out/o1s/dtb.img 2>/dev/null || true
           ls -lh build/out/o1s/dtbo.img 2>/dev/null || true
           ls -lh build/out/o1s/*.zip 2>/dev/null || true
+          ls -lh build/out/o1s/*.tar.md5 2>/dev/null || true
 
           echo "===== ERROR LINES ====="
           grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED\|abort\|SecurityException" build.log | head -250 || true
@@ -215,7 +227,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: o1s-kernel-clean-build
           path: |
@@ -223,5 +235,6 @@ jobs:
             build/out/o1s/Image
             build/out/o1s/*.img
             build/out/o1s/*.zip
+            build/out/o1s/*.tar.md5
             build/out/o1s/modules/**
           if-no-files-found: warn
