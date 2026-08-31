@@ -1,0 +1,6 @@
+id=ghost_zygisk_widevine
+name=Ghost Widevine Zygisk Native Hook
+version=v1.0 (Lớp 8 Native)
+versionCode=100
+author=Ghost Kernel Team
+description=Natively intercepts MediaDrm.getPropertyByteArray("deviceUniqueId") in all applications via Zygisk, returning the 32-byte seed from /proc/ghost_widevine_raw without LSPosed.

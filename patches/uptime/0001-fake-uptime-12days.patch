@@ -1,0 +1,26 @@
+diff --git a/kernel/time/timekeeping.c b/kernel/time/timekeeping.c
+index xxxxxxx..yyyyyyy 100644
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -90,6 +90,25 @@ static struct tk_fast tk_fast_mono ____cacheline_aligned;
+ static struct timekeeper shadow_timekeeper;
+ 
++/* Fake Uptime Toàn Hệ Thống cho Exynos2100 (o1s) - ChicletKernel */
++static inline u64 get_fake_boottime_ns(void)
++{
++       /* Thay đổi số ngày ở đây:
++          10 = 10 ngày
++          12 = 12 ngày (khuyến nghị)
++          15 = 15 ngày */
++       static const u64 fake_days = 12ULL;
++       return fake_days * 86400ULL * 1000000000ULL;   /* NSEC_PER_SEC */
++}
++
+ static u64 timekeeping_get_delta(const struct tk_read_base *tkr)
+ {
++       /* Hook chính: cộng thêm fake boottime để uptime luôn cao */
++       u64 delta = tk_clock_read(tkr) - tkr->cycle_last;
++       return delta + get_fake_boottime_ns();
++
+        return tk_clock_read(tkr) - tkr->cycle_last;
+ }

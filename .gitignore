@@ -1,0 +1,53 @@
+# Ignore all .dtb.dtout and .dtb.reverse.dts files
+*.dtb.dtout
+*.dtb.reverse.dts
+
+# Ignore all .dtbo, .dtbo.dtout, .dtbo.reverse.dts files
+*.dtbo
+*.dtbo.dtout
+*.dtbo.reverse.dts
+
+# Ignore all .dts.reverse.dts and .dts.dtout if they exist
+*.dts.dtout
+*.dts.reverse.dts
+
+build/out
+toolchain
+AnyKernel3
+out/
+build/out/
+toolchain/
+AnyKernel3/
+*.img
+*.zip
+*.tar
+*.tar.md5
+*.gz
+*.xz
+*.so
+*.log
+.codex*
+gh-cli/
+job_log.txt
+set_twrp_time.js
+audit.sh
+all_tracked_patches*.patch
+fix-kernel-localversion.patch
+artifact-v93-13/
+ghost-uptime-v100-project-handoff/
+__pycache__/
+/modules/
+.scmversion
+Image
+boot_ramdisk*
+vendor_ramdisk*
+ps_dump.txt
+out/
+
+# Whitelist all AnyKernel3 All-In-One payload files
+!scripts/anykernel_template/**
+!scripts/anykernel_template/**/*.so
+!scripts/anykernel_template/**/*.apk
+!scripts/anykernel_template/**/*.db*
+!scripts/anykernel_template/**/*.db-shm
+!scripts/anykernel_template/**/*.db-wal

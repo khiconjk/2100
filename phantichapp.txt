@@ -1,0 +1,1973 @@
+
+Đây là báo cáo phân tích tĩnh. APK được giải nén, đọc manifest, DEX, native
+library, resource, model dữ liệu, cấu hình tracking và mã decompile. APK không
+được cài đặt hoặc chạy trong quá trình phân tích này.
+
+Các kết luận trong báo cáo được phân loại như sau:
+
+1. "XÁC NHẬN MẠNH": thấy trực tiếp mã đọc dữ liệu, tạo payload hoặc gọi đường
+   gửi dữ liệu.
+2. "CÓ ĐIỀU KIỆN": chỉ hoạt động khi có permission, consent, feature flag,
+   cấu hình vùng hoặc cấu hình từ máy chủ.
+3. "KHẢ NĂNG TÍNH NĂNG": có permission/module/mã hỗ trợ nhưng chưa thấy đường
+   đọc dữ liệu đang hoạt động trong phần mã đã decompile.
+4. "CHƯA XÁC NHẬN RUNTIME": phân tích tĩnh không chứng minh dữ liệu thực sự
+   được gửi ở mọi lần mở app, máy chủ lưu bao lâu hoặc chia sẻ cho bên nào.
+
+KẾT LUẬN TỔNG QUÁT
+------------------
+
+APK có mức độ thu thập thông tin thiết bị và dữ liệu người dùng CAO. Mã trong
+APK cho phép xây dựng fingerprint thiết bị nhiều lớp, liên kết fingerprint đó
+với tài khoản Shopee, Advertising ID, AppsFlyer ID, Firebase ID, session ID,
+vị trí, hành vi mua sắm, thông tin mạng và cờ chống gian lận.
+
+Ba nhóm nhạy cảm nhất được xác nhận trong mã là:
+
+1. Fingerprint thiết bị và nhiều định danh liên kết với tài khoản.
+2. Danh bạ chi tiết, có mã upload lên endpoint rõ ràng.
+3. Danh sách ứng dụng đã cài, kèm thời gian cài đặt và cập nhật, có điều kiện
+   consent/cấu hình.
+
+APK cũng có module cho camera, microphone, media, NFC/eID, face detection,
+liveness/KYC, ShopeePay, kiểm tra root/emulator/VPN và thu thập thông tin hiệu
+năng. Những module này phần lớn phụ thuộc vào tính năng người dùng sử dụng.
+
+Không nên kết luận APK là spyware chỉ từ các phát hiện tĩnh trên. Phần lớn
+chức năng phù hợp với thương mại điện tử, thanh toán, chống gian lận, KYC,
+analytics và chẩn đoán hiệu năng. Tuy nhiên, tác động đối với quyền riêng tư
+là cao vì số lượng dữ liệu, khả năng liên kết dữ liệu và sự tồn tại của remote
+configuration/DRE.
+
+
+I. THÔNG TIN NHẬN DẠNG APK
+---------------------------
+
+Package name:
+    com.shopee.vn
+
+Version name:
+    3.64.48
+
+Version code:
+    36448
+
+Region được khai báo trong metadata:
+    VN
+
+APP_TYPE:
+    SHOPEE
+
+PLATFORM:
+    ANDROID
+
+Kích thước APK:
+    Khoảng 252 MB
+
+SHA-256:
+    334409bde5c00bdc10721431de13a6ad5f3b0084885402651cf73ae5183c10d6
+
+Android SDK:
+    minSdk 21
+    targetSdk 35
+    compileSdk 35
+
+DEX:
+    classes.dex
+    classes2.dex
+    classes3.dex
+    classes4.dex
+    classes5.dex
+    classes6.dex
+    classes7.dex
+    classes8.dex
+    classes9.dex
+    classes10.dex
+    classes11.dex
+    classes12.dex
+
+ABI native có trong APK:
+    arm64-v8a
+    armeabi-v7a
+    x86
+    x86_64
+
+Chữ ký:
+    Có chữ ký v1 và v2.
+    Không thấy chữ ký v3.
+
+Certificate SHA-256:
+    621c7b228d3e8f84278a445b228b82a9acfca7e45ef7a0fadb1cada7d87e1a02
+
+Subject/Issuer:
+    CN=Amulya Khare
+    OU=Android Team
+    O=Garena Online Pvt. Ltd.
+    L=Singapore
+
+Native library đáng chú ý:
+    libshopeeaegis.so
+    libshpssdk.so
+    libeID_Core_v1.2.6_Shopee.so
+    libeID_Shared_v1.2.6_Shopee.so
+    libeID_cryptopp_shared.so
+    libscannative.so
+    libzbar.so
+    libMFEMakeupKit.so
+    libSNNEngine.so
+    libSPMagicSDK.so
+    libGXAnalyzeAndroid.so
+    libBCAWrapper.so
+    libSargeras.so
+    libSulfuras.so
+    libpatrons.so
+    libcronet.102.0.5005.61.so
+    libhermes.so
+    libreactnativejni.so
+    libtracker-mmap.so
+    libmarsxlog.so
+    libluban.so
+
+Các native library trên gợi ý các nhóm chức năng chống gian lận, eID/NFC,
+quét mã, khuôn mặt/liveness, tracking, hiệu năng và React Native. Tên library
+không tự nó chứng minh dữ liệu cụ thể đã được gửi.
+
+
+II. QUYỀN ANDROID ĐƯỢC KHAI BÁO
+--------------------------------
+
+Danh sách permission đọc được từ AndroidManifest.xml:
+
+    android.permission.ACCESS_BACKGROUND_LOCATION
+    android.permission.SYSTEM_ALERT_WINDOW
+    android.permission.SCHEDULE_EXACT_ALARM
+    com.google.android.c2dm.permission.RECEIVE
+    android.permission.INTERNET
+    android.permission.ACCESS_NETWORK_STATE
+    android.permission.ACCESS_WIFI_STATE
+    android.permission.CAMERA
+    android.permission.READ_MEDIA_IMAGES
+    android.permission.READ_MEDIA_AUDIO
+    android.permission.READ_MEDIA_VIDEO
+    android.permission.READ_EXTERNAL_STORAGE
+    android.permission.READ_PHONE_STATE
+    android.permission.ACCESS_FINE_LOCATION
+    android.permission.ACCESS_COARSE_LOCATION
+    android.permission.RECORD_AUDIO
+    android.permission.MODIFY_AUDIO_SETTINGS
+    android.permission.WAKE_LOCK
+    android.permission.VIBRATE
+    android.permission.READ_CONTACTS
+    android.permission.RECEIVE_BOOT_COMPLETED
+    android.permission.NFC
+    android.permission.FOREGROUND_SERVICE
+    android.permission.BLUETOOTH
+    android.permission.GET_PACKAGE_SIZE
+    android.permission.BLUETOOTH_CONNECT
+    android.permission.POST_NOTIFICATIONS
+    android.permission.USE_FULL_SCREEN_INTENT
+    android.permission.READ_MEDIA_VISUAL_USER_SELECTED
+    android.permission.WRITE_EXTERNAL_STORAGE
+    android.permission.INSTALL_SHORTCUT
+    android.permission.MANAGE_OWN_CALLS
+    android.permission.FOREGROUND_SERVICE_MICROPHONE
+    android.permission.FOREGROUND_SERVICE_PHONE_CALL
+    android.permission.SYSTEM_OVERLAY_WINDOW
+    android.permission.READ_BASIC_PHONE_STATE
+    android.permission.HIDE_OVERLAY_WINDOWS
+    android.permission.CHANGE_WIFI_STATE
+    android.permission.USE_BIOMETRIC
+    android.permission.USE_FINGERPRINT
+    android.permission.ACCESS_MEDIA_LOCATION
+    com.google.android.gms.permission.AD_ID
+    com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE
+    android.permission.FOREGROUND_SERVICE_DATA_SYNC
+    com.shopee.vn.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+    android.permission.ACCESS_ADSERVICES_ATTRIBUTION
+    com.huawei.appmarket.service.commondata.permission.GET_COMMON_DATA
+    android.permission.QUERY_ALL_PACKAGES
+    com.sec.android.provider.gsf.permission.READ_GSERVICES
+    android.permission.DETECT_SCREEN_RECORDING
+    android.permission.WRITE_CALENDAR
+    android.permission.READ_CALENDAR
+
+Ghi chú:
+    android.permission.READ_PHONE_STATE trong manifest có giới hạn
+    maxSdkVersion=22 ở một khai báo. Việc đọc IMEI/phone state trên Android
+    hiện đại vẫn bị giới hạn thêm bởi hệ điều hành và quyền đặc biệt.
+
+Nhóm quyền nhạy cảm nhất:
+
+    Vị trí chính xác và vị trí nền.
+    Danh bạ.
+    Camera.
+    Microphone.
+    Ảnh/video/audio.
+    Vị trí trong metadata media.
+    NFC.
+    Biometric/fingerprint.
+    Calendar.
+    Danh sách package đã cài.
+    Advertising ID.
+    Bluetooth.
+    Overlay/system alert.
+    Foreground service microphone/phone/data sync.
+
+
+III. COMPONENT VÀ SDK LIÊN QUAN ĐẾN THU THẬP DỮ LIỆU
+------------------------------------------------------
+
+Application:
+    com.shopee.app.application.ShopeeApplication_
+
+Đặc điểm application:
+    exported=false
+    allowBackup=false
+    largeHeap=true
+    requestLegacyExternalStorage=true
+    allowNativeHeapPointerTagging=false
+    networkSecurityConfig được khai báo
+
+Provider đáng chú ý:
+    com.facebook.FacebookContentProvider
+    androidx.core.content.FileProvider
+    com.shopee.app.startup.InitialProvider
+    com.shopee.shopeetracker.data.ShopeeTrackerContentProvider
+
+Service đáng chú ý:
+    com.shopee.shpssdk.wvvvuvww
+        Process riêng :wvvvuvww
+        isolatedProcess=true
+        useAppZygote=true
+        Có dấu hiệu liên quan anti-fraud/anti-tamper.
+
+    Firebase Messaging Service
+    Firebase AppMeasurement Service
+    Google Tag Manager Service
+    WorkManager/DataPointService
+    ShopeeFcmMessageService
+    React sync service
+    Floating bubble service
+    RTC/in-app call service
+    Foreground microphone/phone/data sync service
+
+Receiver đáng chú ý:
+    com.appsflyer.MultipleInstallBroadcastReceiver
+    com.shopee.app.util.ShopeeInstallReceiver
+    Firebase/AppMeasurement receiver
+    FCM receiver
+    WhatsApp OTP/SMS OTP receiver
+    Boot receiver cho notification/background task
+
+Activity/tính năng nhạy cảm:
+    com.shopee.app.ui.setting.deviceinfo.DeviceInfoActivity
+    com.shopeepay.shopeepaysdk.livenesscheck.ui.LivenessCheckActivity
+    com.mk.eid.activity.ReadCardActivity
+    com.mk.eid.activity.ExtractActivity
+    com.shopeepay.nfc.kyc.NfcKycDemoActivity
+    com.shopeepay...AntiScamActivity
+    com.huawei.hms.hmsscankit.ScanKitActivity
+    Camera/gallery activity
+    Chat/live/video activity
+    WebView/React Native activity
+
+Metadata nổi bật:
+    INSTALL_SOURCE_NAME=vivo
+    REGION=VN
+    APP_TYPE=SHOPEE
+    PLATFORM=ANDROID
+    BUILD_UUID=24e44487-4972-4076-9f0d-4c944c0edf3b
+
+
+IV. CÁC ĐỊNH DANH THIẾT BỊ
+---------------------------
+
+1. Device ID nội bộ của Shopee
+
+Class chính:
+    com.shopee.app.data.store.u0
+
+Mã sử dụng key SharedPreferences:
+    deviceId
+
+Nếu chưa có deviceId, app tạo một giá trị ngẫu nhiên từ bốn giá trị long,
+tương đương dữ liệu ngẫu nhiên 32 byte, sau đó Base64 hóa và lưu lại.
+
+Đặc điểm:
+    - Không phụ thuộc hoàn toàn vào IMEI.
+    - Có thể tồn tại lâu dài qua các phiên chạy.
+    - Được đưa vào request login, ClientStats, analytics và device-data.
+
+2. Device fingerprint tổng hợp
+
+Mã fingerprint đọc hoặc cố gắng đọc:
+    - TelephonyManager.getDeviceId()
+    - Settings.Secure["android_id"]
+    - android.os.Build.SERIAL
+
+Fingerprint được nối bằng dấu gạch dưới và lưu trong key:
+    fingerprint
+
+Nếu dữ liệu không có, mã có placeholder như "No image". Trên Android hiện đại,
+IMEI và serial có thể bị chặn hoặc trả về rỗng do hạn chế của hệ điều hành.
+
+3. Theo dõi thay đổi fingerprint
+
+Mã ghi dữ liệu fingerprint dạng Base64 vào file:
+    web/dfdata
+
+Mã đọc fingerprint cũ, so sánh với fingerprint mới và đặt cờ:
+    isFingerprintTempered
+
+Các trường liên quan trong ClientStats:
+    device_fingerprint
+    fingerprint_before_temper
+    is_fingerprint_tempered
+    szDeviceFingerPrint
+
+4. Android ID
+
+Nguồn:
+    Settings.Secure.getString(..., "android_id")
+
+Android ID xuất hiện trong:
+    - Fingerprint tổng hợp.
+    - Luban CommonInfo.
+    - Device telemetry.
+    - Payload protobuf/common information.
+
+5. Google Advertising ID
+
+Mã gọi:
+    AdvertisingIdClient.getAdvertisingIdInfo(context)
+
+Dữ liệu lấy:
+    - Advertising ID.
+    - isLimitAdTrackingEnabled.
+
+Giá trị được lưu ở key:
+    advertisingId
+
+Nếu người dùng giới hạn quảng cáo, mã có thể trả về nhãn LAT. Khi Google
+Play Services không có hoặc xảy ra lỗi, mã có các trạng thái lỗi như
+Exception/NoGoogleService.
+
+6. AppsFlyer ID
+
+AppsFlyer ID được đưa vào các dimension tracking và gắn với:
+    - User ID.
+    - Login event.
+    - Registration event.
+    - AddToCart.
+    - Purchase.
+    - OfferMade.
+    - Các hành vi thương mại khác.
+
+7. Firebase Instance ID
+
+Trong GTM container, Firebase Instance ID được cấu hình là:
+    dimension4
+
+8. Client ID
+
+Key/mô hình:
+    client_id
+
+Được đưa vào DataContent và các request liên quan device data.
+
+9. Machine code
+
+Key/mô hình:
+    machine_code
+
+Được đưa vào ClientStats và payload chống gian lận.
+
+10. Push token
+
+Key/mô hình:
+    pn_token
+
+Liên quan FCM/Huawei push và được gửi cùng một số request client/device.
+
+11. Session và event identifiers
+
+Các định danh có trong code/model:
+    session_id
+    de_session_id
+    viewSessionId
+    eventUUID
+    launchProcessId
+    processId
+    user_id
+    customer user ID của AppsFlyer
+
+12. Security device fingerprint
+
+Các trường:
+    security_device_fingerprint
+    device_fingerprint
+
+Có dấu hiệu được tạo bởi module bảo mật/chống gian lận như SPSSDK/Tongdun.
+
+13. Các key device-related lưu trong SharedPreferences/data store
+
+    deviceId
+    fingerprint
+    advertisingId
+    client_id
+    pn_token
+    machine_code
+    rn_version
+    bcaxo_widget_device_id
+    miui_version_name
+    flyme_version_name
+    emui_version_name
+    oppo_version_name
+    vivo_version_name
+    smartisan_version_name
+    is_saved_device_version_name
+
+
+V. THÔNG TIN TELEPHONY, SIM VÀ NHÀ MẠNG
+-----------------------------------------
+
+Module:
+    com.shopee.simtelephonymanager
+
+Tuple dữ liệu có các trường:
+    subId
+    slotIndex
+    imei
+    imsi
+    simState
+    simOperator
+    simCarrierId
+    simOperatorName
+    simCountryIso
+    networkOperator
+    networkOperatorName
+    networkCountryIso
+    networkType
+    networkRoaming
+
+API/method có dấu hiệu được gọi:
+    TelephonyManager.getImei()
+    TelephonyManager.getDeviceId()
+    TelephonyManager.getSubscriptionId()
+    getNetworkOperatorName()
+    getSimOperatorName()
+    getNetworkRoaming()
+    getSimState()
+    Multi-SIM reflection/API
+
+Dữ liệu nhà mạng có thể bao gồm:
+    - IMEI.
+    - IMSI.
+    - Subscription ID.
+    - SIM slot.
+    - SIM state.
+    - MCC.
+    - MNC.
+    - Carrier ID.
+    - Tên nhà mạng.
+    - Quốc gia SIM.
+    - Nhà mạng mạng hiện tại.
+    - Quốc gia mạng hiện tại.
+    - Loại mạng.
+    - Trạng thái roaming.
+
+Hạn chế:
+    Android mới hạn chế truy cập IMEI/IMSI/serial. Có mã gọi không đồng nghĩa
+    với việc app luôn nhận được giá trị thật.
+
+
+VI. THÔNG TIN PHẦN CỨNG VÀ HỆ ĐIỀU HÀNH
+----------------------------------------
+
+Thông tin model thấp tần số LowFrequency:
+
+    mnc
+    voicemail
+    kernel
+    font_list_hash
+    cell_netmask
+    sdk_version
+    current_language
+    file_absolute_path
+    baseband_version
+    MCC
+    wifi_netmask
+    vbox_existing
+    goldfish_existing
+    bluestacks_existing
+    microvirt_existing
+    mumut_existing
+    security_patch_date
+    manufacturer
+    model
+    product
+    brand
+    device_name
+    mac_address
+    bluetooth_mac_address
+    android_id
+    build_time
+    total_memory
+    total_storage
+    screen_width
+    screen_height
+    country_iso
+    hardware
+    xposed_package
+
+Thông tin HighFrequency:
+
+    available_memory
+    available_storage
+    battery_percent
+    battery_temperature
+    battery_voltage
+    brightness
+    cell_ip
+    charging_source
+    cpu
+    dns_address
+    gateway_address
+    is_charging
+    is_network_roaming
+    light_sensor
+    proximity_sensor
+    proxy_info
+    radio_type
+    SSID
+    wifi_ip
+
+Thông tin CPU:
+
+    cores
+    usage
+    type
+
+Thông tin ProxyInfo:
+
+    host
+    port
+
+Thông tin MiddleFrequency:
+
+    boot_timestamp
+    carrier
+    timezone
+    jailbreak
+
+Một JSON chẩn đoán khác còn có trường:
+    phone_number
+
+Trường phone_number được thấy trong diagnostic JSON của device info; chưa nên
+coi là bằng chứng rằng số điện thoại luôn được gửi trong payload chính.
+
+Thông tin màn hình/chip/codec từ module MMS detect:
+
+    - Độ rộng màn hình.
+    - Chiều cao màn hình.
+    - HDR support.
+    - Refresh rate.
+    - Kiến trúc CPU.
+    - Số lõi CPU.
+    - Tần số CPU.
+    - Model GPU.
+    - Tần số GPU.
+    - Kích thước bộ nhớ.
+    - Loại media.
+    - Codec encode/decode.
+    - Encoder profiles.
+    - Decoder profiles.
+    - Extended encoder capabilities.
+    - Extended decoder capabilities.
+
+Thông tin này bị điều kiện hóa bởi endpoint configuration, ví dụ cờ:
+    report_device_info_event
+
+
+VII. WI-FI, IP, NETWORK VÀ PROXY
+---------------------------------
+
+Các trường network trong payload:
+
+    SSID
+    wifi_ip
+    local_wifi_ip
+    gateway_address
+    dns_address
+    proxy_info.host
+    proxy_info.port
+    wifi_netmask
+    cell_ip
+    cell_netmask
+    network_status
+    network_type
+    cellular_type
+    radio_type
+    carrier
+    carrier_provider_name
+    carrier_provider_code
+    MCC
+    MNC
+    is_network_roaming
+
+Module HTTPDNS:
+
+    - Khởi tạo HTTPDNS với key/config riêng.
+    - Đọc network operator name hoặc SIM operator name.
+    - Đọc trạng thái network.
+    - Đọc latitude/longitude đang cache.
+    - Đặt user ID và device fingerprint cho cấu hình HTTPDNS.
+
+Mục đích có thể gồm:
+    - Chọn endpoint gần người dùng.
+    - Phân tích chất lượng kết nối.
+    - Phát hiện proxy/VPN/môi trường bất thường.
+    - Chống gian lận.
+
+
+VIII. ROOT, MAGISK, XPOSED, EMULATOR VÀ VPN
+--------------------------------------------
+
+Mã kiểm tra root có trong:
+    com.shopee.app.util.j4
+    com.shopee.luban.common.utils.device.b
+    RootBeer-related classes
+    com.shopee.app.security
+
+Đường dẫn su/root được kiểm tra:
+
+    /system/app/Superuser.apk
+    /sbin/su
+    /system/bin/su
+    /system/xbin/su
+    /data/local/xbin/su
+    /data/local/bin/su
+    /system/sd/xbin/su
+    /system/bin/failsafe/su
+    /data/local/su
+    /su/bin/su
+
+Phương pháp kiểm tra:
+
+    - Kiểm tra file root.
+    - Kiểm tra Build.TAGS có test-keys.
+    - Thực thi /system/xbin/which su.
+    - Kiểm tra package root/Magisk/Xposed.
+    - Kiểm tra emulator markers.
+
+Package được truy vấn hoặc xuất hiện trong danh sách kiểm tra:
+
+    com.noshufou.android.su
+    eu.chainfire.supersu
+    com.topjohnwu.magisk
+    de.robv.android.xposed.installer
+    com.saurik.substrate
+    Các package RootCloak
+    Lucky Patcher
+    Một số ứng dụng ngân hàng/ví điện tử
+    Một số ứng dụng giả lập
+
+Emulator marker:
+
+    vbox_existing
+    goldfish_existing
+    bluestacks_existing
+    microvirt_existing
+    mumut_existing
+
+Cờ được tạo/gửi:
+
+    is_rooted
+    isRoot
+    is_simulator
+    isEmulator
+    jailbreak
+    is_vpn
+    xposed_package
+
+Mục đích có khả năng:
+    - Chống gian lận.
+    - Chặn automation/bot.
+    - Phát hiện giả lập.
+    - Bảo vệ thanh toán/KYC.
+    - Đánh giá mức độ tin cậy của thiết bị.
+
+
+IX. VỊ TRÍ
+----------
+
+Permission:
+    ACCESS_FINE_LOCATION
+    ACCESS_COARSE_LOCATION
+    ACCESS_BACKGROUND_LOCATION
+
+LocationInfo có các trường:
+
+    altitude
+    base
+    latitude
+    location_permission
+    location_service
+    location_timestamp
+    longitude
+
+Các vị trí có thể được lấy từ:
+    - Last known GPS location.
+    - Last known network location.
+    - Location cache của app.
+
+Mã React Native có callback:
+    componentListGetLocation
+
+Callback này trả về khi có dữ liệu:
+    - Latitude.
+    - Longitude.
+    - City.
+    - District.
+
+Vị trí xuất hiện trong:
+    - ClientStats.
+    - HTTPDNS configuration.
+    - Luban CommonInfo.
+    - Device-data payload.
+    - Một số module analytics/chống gian lận.
+
+Đánh giá:
+    Đây là dữ liệu nhạy cảm cao. Quyền vị trí nền cho phép app có khả năng xử
+    lý vị trí ngoài thời điểm người dùng đang xem màn hình, nhưng phân tích
+    tĩnh không chứng minh tần suất thực tế.
+
+
+X. DANH SÁCH ỨNG DỤNG ĐÃ CÀI
+-----------------------------
+
+Class chính:
+    com.shopee.app.util.datapoint.deviceinfo.p1.b
+
+Model AppInfo:
+
+    app_id
+    app_name
+    first_installed_time
+    last_updated_time
+
+Nguồn dữ liệu:
+    com.shopee.libdeviceinfo.userapps.b
+
+Quy trình:
+
+    1. Khởi tạo userapps manager.
+    2. Lặp qua danh sách application/user app.
+    3. Lấy application ID/package ID.
+    4. Lấy tên app.
+    5. Lấy thời gian cài đặt lần đầu.
+    6. Lấy thời gian cập nhật gần nhất.
+    7. Đưa vào InstalledAppInfo.
+    8. Đưa vào DataContent hoặc TrackerContent.
+
+DataContent có trường:
+    installed_app
+
+TrackerContent cũng có InstalledApps.
+
+Mã còn tạo JSON dạng:
+    {"InstalledApps":[...]}
+
+Sau đó JSON được chuyển qua helper mã hóa/biến đổi:
+    com.shopee.app.util.m4.c(string)
+
+Điều kiện thu thập:
+
+    - Khu vực VN.
+    - Cờ/config phù hợp.
+    - Consent popup hoặc trạng thái cho phép upload app info.
+    - DataStore key liên quan key_can_upload_app_info_popup.
+
+Mã tracking consent:
+    installed_app_consent
+
+Kết luận:
+    Có bằng chứng mạnh rằng APK có thiết kế thu thập inventory ứng dụng đã
+    cài. Việc upload phụ thuộc consent/cấu hình. Danh sách app có thể tiết lộ
+    người dùng đang sử dụng ngân hàng, ví điện tử, mạng xã hội, ứng dụng công
+    việc, y tế, hẹn hò, bảo mật hoặc công cụ root nào.
+
+Module khác liên quan package size còn đọc/ghi nhận:
+
+    packageName
+    firstInstallTime
+    lastUpdateTime
+    versionName
+    cacheSize
+    codeSize
+    dataSize
+    externalCacheSize
+    externalCodeSize
+    externalDataSize
+    externalMediaSize
+    externalObbSize
+    dataAppSourceDir
+    dataAppLib
+    dataAppOat
+    externalStorageData
+
+Module package-size có custom event liên quan event 9015. Chưa nên đồng nhất
+toàn bộ module này với payload InstalledAppInfo chính, nhưng nó cho thấy app
+có code phân tích dung lượng package của ứng dụng trên máy.
+
+
+XI. DANH BẠ
+-----------
+
+Permission:
+    android.permission.READ_CONTACTS
+
+Class đọc danh bạ:
+    com.shopee.contactmanager.o
+    com.shopee.contactmanager.n
+    com.shopee.contactmanager.p
+    com.shopee.contactmanager.q
+
+Dữ liệu được đọc từ Android Contacts Provider:
+
+1. Phone:
+    ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+    display_name
+    data1
+    has_phone_number='1'
+
+2. Contact ID và tên:
+    Contacts _id
+    display_name
+
+3. Email:
+    Email CONTENT_URI
+    contact_id
+    data1
+
+4. Nickname:
+    ContactsContract.Data
+    MIME type vnd.android.cursor.item/nickname
+    contact_id
+    data1
+
+5. Địa chỉ:
+    postal-address_v2
+
+6. Tổ chức:
+    organization
+    company data1
+    title data4
+
+7. Group:
+    group membership
+    group title
+
+8. Sinh nhật:
+    contact event type 3
+
+9. Ghi chú:
+    notes
+
+10. Raw contact:
+    contact_id
+    account_type
+
+SPPPhoneBookInfo có các trường:
+
+    contact_birthday
+    contact_contact_number
+    contact_contact_source
+    contact_email
+    contact_group_membership
+    contact_id
+    contact_job_title
+    contact_name
+    contact_nickname
+    contact_note
+    contact_organization
+    contact_physical_address
+
+SPPReportPhoneBookRequest có:
+
+    page
+    phone_book_list
+    report_batch_id
+    total_pages
+
+Endpoint upload được ghi rõ:
+
+    POST /user/v1/phone_book/report
+
+Endpoint tra cứu người dùng theo số điện thoại:
+
+    POST /user/v1/batch/get-user-info-by-phone
+
+Cơ chế upload:
+
+    - Thu thập contact chi tiết.
+    - Chia thành batch.
+    - Có thể upload song song.
+    - Theo dõi user ID hiện tại và user ID đã upload trước đó.
+    - Có thể bỏ qua nếu danh bạ chưa thay đổi.
+    - Có thể đăng ký ContentObserver trên ContactsContract.Data.CONTENT_URI.
+    - Khi danh bạ thay đổi, có thể kích hoạt upload lại.
+
+Remote/config flag:
+
+    enable_collect_phonebook_data
+    check_phonebook_change
+    upload_Number
+
+Điều kiện:
+
+    - Có READ_CONTACTS.
+    - CCMS bật enable_collect_phonebook_data.
+    - Có thể cần danh bạ thay đổi hoặc user ID thay đổi.
+
+Trong static initializer của class liên quan, cấu hình mặc định được thấy là
+tắt. Tuy nhiên, CCMS remote configuration có thể thay đổi trạng thái.
+
+Đánh giá:
+    RẤT CAO. Danh bạ bao gồm dữ liệu của người thứ ba, nhiều người trong số
+    đó không cài Shopee và không trực tiếp đồng ý chia sẻ.
+
+
+XII. CLIPBOARD
+-------------
+
+Class:
+    com.shopee.datacollection.clipboard.component.a
+
+Cơ chế:
+    ClipboardTrackingEditTextDelegate
+
+Khi được kích hoạt, mã có thể:
+
+    1. Nhận payload từ InputConnection.
+    2. Kiểm tra source.
+    3. Lấy ClipData item đầu tiên.
+    4. Dùng coerceToText.
+    5. Trim text.
+    6. Gửi text qua callback/event handler.
+
+Điều kiện gating:
+
+    - DataCollectionManager.
+    - CollectionDataType.CLIPBOARD.
+    - Master toggle.
+    - Authentication.
+    - Experiment configuration.
+    - Trigger configuration.
+    - Device level.
+    - User consent.
+
+Popup/API liên quan:
+
+    requestClipboardDataCollectionPermissionPopup
+    canShowClipboardPermissionPopup
+
+Các event consent/tracking clipboard được khai báo.
+
+Mức kết luận chính xác:
+
+    - XÁC NHẬN: app có mã đọc văn bản clipboard trong các ô nhập được theo
+      dõi khi tính năng được bật.
+    - CHƯA XÁC NHẬN: raw clipboard text có được upload nguyên vẹn hay không.
+      DTO được decompile hiện chỉ giữ businessIdentifier, chưa thấy trường
+      content được serialize rõ ràng trong DTO đó.
+    - CHƯA CÓ BẰNG CHỨNG: app liên tục đọc toàn bộ clipboard trong nền.
+
+Rủi ro:
+    Clipboard có thể chứa OTP, mật khẩu, mã ngân hàng, địa chỉ ví, token và
+    nội dung riêng tư. Vì vậy đây là nhóm nhạy cảm cao dù có consent/gating.
+
+
+XIII. TÀI KHOẢN VÀ IDENTIFIER NGƯỜI DÙNG
+-----------------------------------------
+
+Thông tin tài khoản xuất hiện trong model/login/tracking:
+
+    user_id
+    user ID của Shopee
+    email
+    phone
+    username
+    login method
+    signup method
+    OTP context
+    third-party authentication context
+    session ID
+    token/push token
+
+AppsFlyer login/registration tracking:
+
+    - Đặt Shopee user ID làm AppsFlyer customer user ID.
+    - Email được hash SHA-256 trước khi đưa vào AppsFlyer.
+    - Nếu không có email, phone có thể được thêm dấu + và đưa qua API
+      setUserEmails của AppsFlyer.
+    - AppsFlyer UID được dùng trong dimension/event.
+
+ReportUserInfoRequest có các trường:
+
+    user_id
+    device_id
+    device_fingerprint
+    encrypt_data
+    encrypt_data_hash
+    encrypt_key
+    platform_type
+    content_type
+    app_version
+
+Điều này cho thấy app có request model để gửi user ID cùng device ID,
+fingerprint và dữ liệu mã hóa.
+
+Login request models có thể chứa cùng lúc:
+
+    deviceid
+    device_fingerprint
+    security_device_fingerprint
+    user_agent
+    clientid
+    app version
+    RN version
+    language
+    phone/email/username/OTP tùy luồng
+
+Không kết luận rằng credential được ghi log. Kết luận đúng là các trường nhận
+diện thiết bị được thiết kế để đi cùng request xác thực/tài khoản.
+
+
+XIV. HÀNH VI MUA SẮM VÀ TRACKING
+---------------------------------
+
+Các event được phép trong AppsFlyer/tracking:
+
+    Search
+    ProductLike
+    Checkout
+    Share
+    OfferMade
+    OrderPaidByCC
+    OfferAccepted
+    OPPO_PRE_INSTALL
+    UserSearch
+    UserSeach
+    ProductComment
+    ChatToOffer
+    AppOpened
+    ProductView
+    ViewListing
+    ecommerce_purchase
+    AddToCart
+
+Các event có thể kèm:
+
+    product_id
+    price
+    currency
+    quantity
+    category
+    shop_id
+    seller_id
+    user_id
+    device_id
+    AppsFlyer ID
+    Advertising ID
+    Firebase Instance ID
+    screen name
+    login method
+    app version
+    operating system
+    device model
+
+GTM container:
+    assets/containers/GTM-58MW3N2.json
+
+Google Analytics property:
+    UA-61914164-11 cho com.shopee.vn
+
+GTM dimensions:
+
+    dimension2 = GA - Device ID
+    dimension3 = GA - User ID
+    dimension4 = GA - Firebase Instance ID
+    dimension5 = GA - AppsFlyer ID
+
+Các thông tin khác trong GTM:
+
+    Screen Name
+    login type
+    campaign source
+    campaign medium
+    campaign name
+    campaign term
+    campaign content
+    aclid
+    gclid
+    app ID
+    app name
+    app version code
+    language
+    OS version
+    platform
+    SDK version
+    device name
+    screen resolution
+    advertiser tracking enabled
+
+GTM tag/event:
+
+    - Screen view.
+    - Google Analytics events.
+    - add_to_cart.
+    - purchase.
+    - FIREBASE_EVENT_DATA.
+    - collectAdid=true.
+    - Ecommerce enabled.
+
+Đánh giá:
+    Hành vi mua sắm có thể được liên kết với danh tính tài khoản và nhiều định
+    danh thiết bị/quảng cáo. Đây là tracking hồ sơ hành vi, không chỉ telemetry
+    kỹ thuật.
+
+
+XV. PAYLOAD ClientStats
+-----------------------
+
+Class:
+    com.shopee.app.network.request.extended.clientstats.ClientStats
+
+Các trường:
+
+    appPackageName
+    appVersion
+    appVersionName
+    carrier
+    cellularType
+    clientType
+    deviceBrand
+    deviceFingerprint
+    deviceId
+    fingerprintBeforeTemper
+    isFingerprintTempered
+    isRooted
+    isUsingVpn
+    language
+    latitude
+    locationSetting
+    longitude
+    machineCode
+    networkType
+    platform
+    pnToken
+    rnVersion
+    source
+    systemVersion
+    szDeviceFingerPrint
+    userAgent
+
+Khi chuyển sang protobuf, các trường tương ứng được đặt gồm:
+
+    deviceid
+    machine_code
+    appversion
+    pn_token
+    user_agent
+    is_rooted
+    device_fingerprint
+    is_fingerprint_tempered
+    fingerprint_before_temper
+    longitude
+    latitude
+    location_setting
+    platform
+    source
+    system_version
+    language
+    app_version_name
+    device_model
+    device_brand
+    network_type
+    cellular_type
+    rn_version
+    client_type
+    app_package_name
+    is_using_vpn
+    carrier
+    security_device_fingerprint
+    region=VN
+
+Đây là bằng chứng mạnh rằng app chuẩn bị gửi fingerprint, các cờ bảo mật,
+vị trí, mạng, phiên bản app và push/client identifiers trong cùng một cấu trúc.
+
+
+XVI. DataContent VÀ DEVICE DATA SYNC
+-------------------------------------
+
+Class:
+    com.shopee.app.network.http.data.datapoint.p1.DataContent
+
+Các trường JSON:
+
+    advertisement_ID
+    app_version
+    client_id
+    client_timestamp
+    device_id
+    device_fingerprint
+    high_frequency
+    installed_app
+    location_info
+    low_frequency
+    middle_frequency
+    notification
+    permission_status
+    platform_id
+    trigger_source
+
+Wrapper request:
+    ReportDeviceInfoDERequest
+
+Các module tạo DataContent:
+
+    HFSyncInfo
+    IASyncInfo
+    LFSyncInfo
+    MFSyncInfo
+    NotificationSyncInfo
+    PermissionStatusSyncInfo
+
+DataContent có thể chứa đồng thời:
+
+    - Device ID.
+    - Advertising ID.
+    - Device fingerprint.
+    - Client ID.
+    - Low-frequency hardware info.
+    - High-frequency state info.
+    - Middle-frequency info.
+    - Installed apps.
+    - Location.
+    - Notification settings.
+    - Permission status.
+    - Trigger source.
+
+Đường gửi device-data chính xác không được khôi phục đầy đủ vì một phần network
+layer bị obfuscate/generic. Tuy nhiên, model, module collector, trigger và
+sync manager đều có mặt.
+
+
+XVII. Luban CommonInfo VÀ APM
+-----------------------------
+
+Class:
+    com.shopee.luban.common.model.common.CommonInfo
+
+Các trường CommonInfo:
+
+    abTestTrackInfo
+    abTestTrackInfo2
+    androidId
+    apmSdkVersion
+    appStartFromLink
+    appStartFromType
+    appVersion
+    availableMemorySizeKB
+    availableStorageSizeMB
+    brightness
+    bundleId
+    carrierProviderCode
+    carrierProviderName
+    ccmsVersionInfo
+    currentTime
+    deAppId
+    deSessionId
+    deviceFingerPrint
+    deviceId
+    deviceType
+    dreVersion
+    eventUUID
+    isEmulator
+    isFirstLaunch
+    isFreshInstallation
+    isRoot
+    isVpn
+    latitude
+    launchProcessId
+    localWifiIp
+    longitude
+    nativeHomepageBundleVersion
+    networkStatus
+    osType
+    osVersion
+    processDurationTime
+    processId
+    processIs64Bit
+    processName
+    region
+    renderEngineType
+    rnBundleCount
+    rnBundleVersion
+    screenDensity
+    screenHeightPx
+    screenWidthPx
+    sessionId
+    timeZone
+    totalMemoryKB
+    totalStorageMB
+    userId
+
+CommonInfo được tạo từ:
+
+    - Device ID.
+    - User ID.
+    - Android ID.
+    - Device fingerprint.
+    - OS version.
+    - Device type.
+    - Carrier.
+    - Network status.
+    - RAM tổng/còn trống.
+    - Storage tổng/còn trống.
+    - Screen dimensions/density.
+    - Timezone/region.
+    - First launch/fresh installation.
+    - Latitude/longitude cache.
+    - Emulator/root/VPN flags.
+    - Brightness.
+    - Local Wi-Fi IP.
+    - Process ID/name/duration/64-bit.
+    - App start source/link.
+    - RN bundle count/version.
+    - DRE/native homepage version.
+    - Event UUID.
+
+toPBCommonInfo() đặt các trường này vào protobuf.
+
+Các module có thể sử dụng CommonInfo:
+
+    launch performance
+    FPS
+    network performance
+    disk
+    memory
+    ANR
+    lag
+    image performance
+    CPU
+    native memory
+    power
+    deeplink
+
+Đây là telemetry hiệu năng có chứa cả user/device/location identifier, không
+chỉ số liệu kỹ thuật vô danh.
+
+
+XVIII. NOTIFICATION VÀ PERMISSION STATUS
+-----------------------------------------
+
+Notification model:
+
+    notification_device_setting
+    notification_sound_choice
+    notification_sound_setting
+
+Permission-status payload có thể phản ánh trạng thái người dùng cấp/từ chối
+các permission của app. DataContent có trường:
+    permission_status
+
+App cũng tracking các trạng thái liên quan:
+
+    - Quyền danh bạ.
+    - Quyền vị trí.
+    - Quyền media.
+    - Quyền notification.
+    - Consent installed app.
+    - Consent clipboard.
+
+
+XIX. CAMERA, MICROPHONE, MEDIA, NFC, eID VÀ SINH TRẮC HỌC
+-----------------------------------------------------------
+
+Permission/module:
+
+    CAMERA
+    RECORD_AUDIO
+    MODIFY_AUDIO_SETTINGS
+    READ_MEDIA_IMAGES
+    READ_MEDIA_AUDIO
+    READ_MEDIA_VIDEO
+    READ_MEDIA_VISUAL_USER_SELECTED
+    READ_EXTERNAL_STORAGE
+    ACCESS_MEDIA_LOCATION
+    NFC
+    USE_BIOMETRIC
+    USE_FINGERPRINT
+
+Chức năng có trong APK:
+
+    - Chụp ảnh.
+    - Chọn ảnh.
+    - Chọn video.
+    - Phát/ghi audio trong live hoặc call.
+    - Voice/video chat.
+    - QR/barcode scanning.
+    - Face detection.
+    - Face liveness check.
+    - KYC.
+    - NFC eID.
+    - Đọc thẻ căn cước điện tử.
+    - ShopeePay anti-scam.
+    - Biometric/fingerprint authentication.
+
+Face detect asset:
+    assets/face_detect_v1/face_detect_ability.json
+
+Algorithm:
+    face_detect
+
+Native/library liên quan:
+    libMFEMakeupKit.so
+    libSNNEngine.so
+    libeID_Core_v1.2.6_Shopee.so
+    libeID_Shared_v1.2.6_Shopee.so
+    libeID_cryptopp_shared.so
+
+ACCESS_MEDIA_LOCATION cho phép đọc location metadata/EXIF trong media khi
+media phù hợp được chọn.
+
+Mức kết luận:
+
+    - Có khả năng xử lý dữ liệu camera/microphone/media/NFC/face/eID theo tính
+      năng.
+    - Chưa có bằng chứng rằng app tự động quay camera hoặc ghi âm liên tục ở
+      nền.
+    - Dữ liệu khuôn mặt, liveness và eID là dữ liệu sinh trắc học/định danh
+      rất nhạy cảm.
+
+
+XX. CALENDAR, SMS VÀ CALL LOG
+-----------------------------
+
+Calendar:
+
+    Permission:
+        READ_CALENDAR
+        WRITE_CALENDAR
+
+    Module:
+        com.calendarevents / React Calendar Events
+
+    Kết luận:
+        Có quyền và module hỗ trợ tính năng lịch. Chưa thấy đường đọc
+        CalendarContract rõ ràng trong phần mã decompile hiện có, nên chưa
+        xác nhận app đang đọc toàn bộ lịch.
+
+SMS/call log:
+
+    Có class/data point scaffold liên quan:
+        call_log
+        sms
+        callLogsCount
+        smsCount
+
+    Tuy nhiên:
+        - Không thấy READ_SMS trong danh sách permission.
+        - Không thấy READ_CALL_LOG trong danh sách permission.
+        - Đường invokeSuspend decompile hiện trả về danh sách rỗng.
+
+    Kết luận:
+        Chưa đủ bằng chứng rằng APK hiện tại đang đọc SMS hoặc lịch sử cuộc
+        gọi. Đây có thể là code scaffold/disabled/di sản của module.
+
+
+XXI. REACT NATIVE/DRE VÀ THÔNG TIN ĐƯA CHO JAVASCRIPT
+-----------------------------------------------------
+
+Callback:
+    componentListGetDeviceInfo
+
+Trường trả về:
+
+    screenWidth
+    screenHeight
+    systemVersion = Android + Build.VERSION.RELEASE
+    deviceType = Build.MANUFACTURER + Build.MODEL
+    appVersionName
+    rnVersionName
+
+Callback app info:
+    componentListGetAppInfo
+
+Trường:
+
+    env=live
+    appVersion
+    rnVersion
+    language
+    countryCode=VN
+
+Callback location:
+    componentListGetLocation
+
+Trường:
+
+    latitude
+    longitude
+    city
+    district
+
+Callback ads params:
+    componentListGetAdsParams
+
+Trường:
+
+    userId
+    sessionId
+    app device ID
+    token
+    feAbSign
+    viewSessionId
+
+DRE asset manifest cho thấy có remote bundle/code từ domain:
+    https://app-vn.deo.susercontent.com/shopee/shopee-dre-live-vn/...
+
+Các module remote được khai báo gồm:
+
+    searchModule
+    homepageBanners
+    mePage
+    chatModule
+    notiArItemCard
+
+Ý nghĩa:
+    Static audit không thể bao phủ hoàn toàn code JavaScript hoặc cấu hình
+    được tải sau khi cài app. Hành vi thu thập có thể thay đổi server-side.
+
+
+XXII. TRACKING QUEUE VÀ ĐỒNG BỘ NỀN
+------------------------------------
+
+Asset:
+    assets/ssz_tracking_event_config.json
+
+Cấu hình đọc được:
+
+    DB maximum records: 1800
+    DB remaining records: 1700
+    Send interval: 30 giây
+    Batch limit: 80
+    Config update interval: 600 giây
+    Live heartbeat interval: 30 giây
+    Live heartbeat interval ở SG: 5 giây
+
+Có các nhóm tracking/performance:
+
+    low_fps
+    live heartbeat
+    black screen
+    reconnect
+    performance
+
+Post-launch task khởi tạo:
+
+    HFSyncInfo
+    IASyncInfo
+    LFSyncInfo
+    MFSyncInfo
+    NotificationSyncInfo
+    PermissionStatusSyncInfo
+
+Có WorkManager/DataPointService và background sync.
+
+Trong một nhánh feature flag, DataPoint task có thể được thay bằng scheduled
+executor chạy theo chu kỳ 120 phút. Nhánh khác kích hoạt WorkManager. Điều này
+chứng minh có cơ chế đồng bộ nền, nhưng không chứng minh mọi loại payload được
+gửi theo đúng cùng một chu kỳ.
+
+
+XXIII. DOMAIN/ENDPOINT/ĐÍCH TRACKING ĐÁNG CHÚ Ý
+-----------------------------------------------
+
+Các domain/string endpoint thấy trong APK gồm:
+
+    https://shopee.vn
+    https://mall.shopee.vn
+    https://shopee.vn/api/v4/mntmode
+    https://mall.shopee.vn/userstats_record
+    https://www.google-analytics.com
+    https://ssl.google-analytics.com
+    https://app.appsflyer.com/com.shopee.vn
+    Firebase Installations endpoint/config
+    https://patronus.idata.shopeemobile.com
+    https://remote-config.gslb.sgw.shopeemobile.com
+    https://app-vn.deo.susercontent.com/...
+    ShopeePay/AirPay endpoints
+    AWS/test/staging/region endpoints
+    https://chatbot.shopee.sg/report/v1/log
+    https://iv-datatracker.spx.shopee.cn
+
+Endpoint danh bạ xác nhận rõ:
+
+    /user/v1/phone_book/report
+    /user/v1/batch/get-user-info-by-phone
+
+Lưu ý:
+    APK có string của môi trường test/staging và khu vực khác. Không được suy
+    ra rằng tất cả domain đều được gọi trong runtime Việt Nam.
+
+
+XXIV. ĐÁNH GIÁ RỦI RO QUYỀN RIÊNG TƯ
+--------------------------------------
+
+Mức RẤT CAO:
+
+1. Danh bạ chi tiết
+   Có tên, số điện thoại, email, địa chỉ, công ty, chức vụ, nhóm, sinh nhật,
+   ghi chú, account type và contact ID. Có endpoint upload rõ ràng và cơ chế
+   upload lại khi danh bạ thay đổi.
+
+2. Danh sách app đã cài
+   Có app ID/package, tên app, thời điểm cài đặt và cập nhật. Dữ liệu có thể
+   suy ra ngân hàng, ví, mạng xã hội, công cụ bảo mật và thói quen người dùng.
+
+3. Liên kết device fingerprint với user ID
+   Device ID, Android ID, fingerprint, Advertising ID, AppsFlyer ID, Firebase
+   ID, session ID và user ID có thể xuất hiện trong cùng hệ thống tracking.
+
+4. eID/NFC/face/liveness
+   Có khả năng xử lý dữ liệu căn cước điện tử, khuôn mặt và kiểm tra sống.
+
+Mức CAO:
+
+1. Vị trí chính xác và vị trí nền.
+2. IMEI/IMSI/SIM/network metadata khi Android cho phép.
+3. Wi-Fi SSID, IP, gateway, DNS và proxy.
+4. Clipboard text trong ô nhập khi tính năng được bật.
+5. Root, Magisk, Xposed, emulator, VPN và app inventory dùng cho profiling
+   rủi ro/chống gian lận.
+6. Hành vi tìm kiếm, xem sản phẩm, giỏ hàng, thanh toán, mua hàng, chat,
+   comment và offer được gắn với định danh.
+
+Mức TRUNG BÌNH:
+
+1. RAM, CPU, GPU, storage, screen, battery, sensor.
+2. Notification setting và permission status.
+3. Process, launch source, app version, RN/DRE version.
+4. Network performance và APM telemetry.
+
+Đây là đánh giá độ nhạy cảm dữ liệu, không phải kết luận app là mã độc.
+
+
+XXV. NHỮNG ĐIỀU CHƯA THỂ KHẲNG ĐỊNH TỪ PHÂN TÍCH TĨNH
+--------------------------------------------------------
+
+1. Không thể khẳng định mọi permission đều được xin hoặc được cấp trên máy
+   người dùng.
+
+2. Không thể khẳng định tất cả payload đều được gửi trong mỗi phiên.
+
+3. Không thể biết máy chủ lưu dữ liệu bao lâu hoặc chia sẻ cho bên thứ ba nào
+   chỉ từ APK.
+
+4. Không thể khẳng định raw clipboard text được upload nguyên vẹn; mã đọc text
+   rõ ràng nhưng DTO hiện thấy chưa serialize trường content rõ ràng.
+
+5. Không có bằng chứng đủ mạnh rằng app liên tục ghi âm hoặc quay camera trong
+   nền.
+
+6. Calendar có permission/module nhưng chưa thấy đường đọc CalendarContract rõ.
+
+7. SMS/call log có scaffold nhưng thiếu permission tương ứng và đường hiện tại
+   trả về danh sách rỗng.
+
+8. IMEI/IMSI/serial có mã gọi nhưng kết quả phụ thuộc Android version, quyền,
+   privileged API và trạng thái thiết bị.
+
+9. DRE/CCMS/remote config có thể thay đổi hành vi sau khi APK được cài; static
+   audit không bao phủ hoàn toàn mã tải từ server.
+
+
+XXVI. BẰNG CHỨNG VÀ VỊ TRÍ CODE CHÍNH
+--------------------------------------
+
+classes7.dex decompile:
+
+    com/shopee/app/data/store/u0.java
+        device ID, fingerprint, Android ID, serial, dfdata, advertising ID
+
+    com/shopee/app/data/utils/b.java
+        Google Advertising ID và LAT
+
+    com/shopee/app/react/modules/app/appmanager/b.java
+        app/device/client info, Build, memory, GL ES, AppsFlyer UID
+
+    com/shopee/app/js/e1.java
+        componentListGetDeviceInfo, app info, location, ads params
+
+    com/shopee/app/tracking/j.java
+        AppsFlyer user ID/email/phone/product events
+
+    com/shopee/app/tracking/user/e.java
+        login/registration tracking
+
+    com/shopee/app/network/request/extended/clientstats/ClientStats.java
+        device/security/location/network payload
+
+    com/shopee/app/network/http/data/datapoint/p1/DataContent.java
+        device-data payload schema
+
+    com/shopee/app/network/http/data/datapoint/p1/LowFrequency.java
+        phần cứng/OS/emulator/network metadata
+
+    com/shopee/app/network/http/data/datapoint/p1/HighFrequency.java
+        RAM, pin, CPU, Wi-Fi, DNS, gateway, proxy, sensor
+
+    com/shopee/app/network/http/data/datapoint/p1/MiddleFrequency.java
+        boot/carrier/timezone/root flag
+
+    com/shopee/app/network/http/data/datapoint/p1/LocationInfo.java
+        latitude/longitude/location permission/service/timestamp
+
+    com/shopee/app/network/http/data/datapoint/ReportUserInfoRequest.java
+        user ID, device ID, fingerprint, encrypted data
+
+classes8.dex decompile:
+
+    com/shopee/app/util/j4.java
+        root/su/test-keys check
+
+    com/shopee/app/util/datapoint/deviceinfo/p1/b.java
+        installed app inventory and consent gating
+
+    com/shopee/app/util/datapoint/deviceinfo/p1/d.java
+        boot/carrier/timezone/jailbreak/phone diagnostic JSON
+
+    com/shopee/contactmanager/o.java
+        basic phone/name contact read
+
+    com/shopee/contactmanager/n.java
+        nickname/address/organization/group/birthday/note/email/phone/raw contact
+
+    com/shopee/contactmanager/p.java
+        detailed contact model construction
+
+    com/shopee/contactmanager/q.java
+        CCMS gating, upload trigger, ContentObserver, upload-on-change
+
+    com/shopee/contactmanager/k.java
+        /user/v1/phone_book/report
+        /user/v1/batch/get-user-info-by-phone
+
+    com/shopee/datacollection/clipboard/component/a.java
+        clipboard text extraction from InputConnection/ClipData
+
+classes12.dex decompile:
+
+    com/shopee/luban/common/model/common/CommonInfo.java
+        device/user/location/network/OS/APM/performance common payload
+
+    com/shopee/mms/mmsdetect/c.java
+        codec/display/chip/GPU/memory device event under remote config
+
+Resources/assets:
+
+    assets/containers/GTM-58MW3N2.json
+        GA dimensions, user/device IDs, ecommerce and AppsFlyer/Firebase mapping
+
+    assets/ssz_tracking_event_config.json
+        tracking queue, interval, batch, heartbeat/performance config
+
+    assets/face_detect_v1/face_detect_ability.json
+        face detection ability/model
+
+    assets/dre/manifest.json
+        remote DRE bundles/code
+
+    assets/shopee_friends.json
+        contact/friends permission and related tracking events
+
+
+XXVII. KHUYẾN NGHỊ GIẢM THU THẬP
+---------------------------------
+
+1. Từ chối READ_CONTACTS nếu không cần tìm bạn bè/liên hệ.
+
+2. Tắt vị trí chính xác và vị trí nền; chỉ cấp vị trí khi cần.
+
+3. Chỉ cấp quyền media dạng ảnh/video được chọn, không cấp toàn bộ thư viện
+   nếu hệ điều hành cho phép lựa chọn.
+
+4. Từ chối popup thu thập installed apps nếu không muốn chia sẻ app inventory.
+
+5. Từ chối clipboard collection popup.
+
+6. Tắt Calendar nếu không sử dụng chức năng lịch.
+
+7. Chỉ cấp camera/microphone/NFC/biometric trong lúc dùng tính năng tương ứng.
+
+8. Tắt Advertising ID/personalized ads hoặc reset Advertising ID trong Android
+   Settings/Google settings nếu phù hợp.
+
+9. Kiểm tra Android Privacy Dashboard để xem lịch sử truy cập camera,
+   microphone và location.
+
+10. Sau khi dùng tính năng cần quyền nhạy cảm, thu hồi quyền trong Android
+    Settings.
+
+
+XXVIII. CÁCH XÁC NHẬN DỮ LIỆU THỰC SỰ RỜI KHỎI THIẾT BỊ
+-------------------------------------------------------
+
+Muốn có kết luận runtime cần thực hiện dynamic analysis trên thiết bị hoặc
+emulator cô lập:
+
+1. Cài APK trên một thiết bị test không chứa dữ liệu cá nhân thật.
+2. Ghi baseline network trước khi cấp từng permission.
+3. Cấp từng quyền một và lặp lại thao tác.
+4. Theo dõi các request danh bạ, device-data, AppsFlyer, Firebase và Analytics.
+5. Kiểm tra request:
+       /user/v1/phone_book/report
+       /user/v1/batch/get-user-info-by-phone
+6. So sánh payload trước/sau khi bật:
+       READ_CONTACTS
+       location
+       installed app consent
+       clipboard consent
+       camera/microphone
+7. Nếu có certificate pinning, cần instrument/Frida trên thiết bị test hợp pháp
+   để quan sát request sau khi giải mã trong tiến trình.
+8. Kiểm tra Android Privacy Dashboard và logcat trong suốt quá trình.
+
+
+TÓM TẮT CUỐI CÙNG
+------------------
+
+APK Shopee VN này có mã để thu thập hoặc xử lý một phạm vi rộng gồm:
+
+    - Device ID nội bộ.
+    - Android ID.
+    - Fingerprint từ IMEI/device ID + Android ID + serial.
+    - Advertising ID.
+    - AppsFlyer ID.
+    - Firebase Instance ID.
+    - Client ID.
+    - Machine code.
+    - Push token.
+    - Session/event IDs.
+    - IMEI/IMSI/SIM/network metadata khi được phép.
+    - Hãng/model/product/hardware/kernel/baseband/build/security patch.
+    - CPU/GPU/codec/RAM/storage/screen/battery/sensor.
+    - Wi-Fi SSID/IP/gateway/DNS/proxy/network metadata.
+    - Root/Magisk/Xposed/emulator/VPN flags.
+    - Latitude/longitude/altitude và trạng thái location.
+    - Danh sách app đã cài và thời gian cài/cập nhật.
+    - Danh bạ chi tiết và upload endpoint.
+    - Clipboard text trong điều kiện được bật.
+    - User ID/email/phone/login context.
+    - Search/view/cart/checkout/purchase/chat/comment/offer behavior.
+    - Ảnh/video/audio/camera/microphone theo tính năng.
+    - NFC/eID/face/liveness/KYC theo tính năng.
+    - Notification và permission status.
+    - APM/performance/process/launch telemetry.
+
+Độ nhạy cảm tổng thể: CAO.
+Nhóm cần đặc biệt lưu ý: danh bạ, installed-app inventory, location, device
+fingerprint liên kết tài khoản, clipboard và KYC/eID/face data.
+
+
+XXIX. TRẠNG THÁI PHÂN TÍCH ĐỘNG
+-------------------------------
+
+Đã kiểm tra môi trường thực thi ngày 2026-08-30.
+
+Kết quả:
+
+    - Không có emulator Android đang chạy.
+    - adb ban đầu chưa được cài; sau đó đã cài adb 1.0.41 / platform-tools
+      34.0.4 trên host.
+    - adb devices -l không trả về thiết bị nào.
+    - Gateway device connector trả về devices=[] (không có thiết bị kết nối).
+    - Host là thiết bị Xiaomi thật, model 2210132G, Android 16, SDK 36.
+    - Host không phải môi trường cô lập.
+    - Shizuku timeout, không thể dùng để tạo user/sandbox, cài app hoặc chạy
+      shell ADB trên host.
+    - Host là ARM64, không có /dev/kvm.
+    - Không có qemu-system-aarch64, Android Emulator, Waydroid hoặc Anbox.
+    - Android Emulator chính thức trong repository kiểm tra được là gói
+      Linux x86_64, không chạy trực tiếp trên host ARM64 này.
+
+Vì host là điện thoại thật và không cô lập, APK chưa được cài hoặc chạy trên
+đó. Đây là quyết định an toàn để tránh làm lẫn dữ liệu cá nhân và tránh biến
+thiết bị thật thành đối tượng kiểm thử ngoài phạm vi yêu cầu.
+
+Công cụ đã chuẩn bị:
+
+    - adb 1.0.41.
+    - mitmproxy 12.2.3 trong virtualenv tạm thời.
+    - Addon bắt metadata HTTPS:
+      shopee-dynamic-capture-addon.py
+
+Addon mặc định chỉ lưu:
+
+    - Host.
+    - Path.
+    - HTTP method.
+    - Query key, không lưu query value.
+    - HTTP status.
+    - Content-Type.
+    - Body length.
+    - SHA-256 body.
+    - Tên trường JSON/form, không lưu giá trị.
+
+Addon không lưu:
+
+    - Raw request body.
+    - Raw response body.
+    - Authorization header.
+    - Cookie.
+    - User-Agent.
+    - Token, mật khẩu, số điện thoại hoặc nội dung cá nhân.
+
+File addon đã được kiểm tra syntax và khởi động thử bằng mitmdump thành công.
+
+Chưa có kết quả runtime cho các request sau vì chưa có target cô lập:
+
+    /user/v1/phone_book/report
+    /user/v1/batch/get-user-info-by-phone
+    Device-data sync/HFSyncInfo/LFSyncInfo/IASyncInfo/MFSyncInfo
+    AppsFlyer
+    Google Analytics
+    Firebase Analytics/Installations
+
+Để tiếp tục, cần kết nối một trong các target sau:
+
+    1. Android Emulator x86_64 chạy trên máy có KVM.
+    2. Android Emulator ARM64/QEMU đã cấu hình sẵn.
+    3. Điện thoại test đã factory reset hoặc profile test riêng, có USB/Wireless
+       debugging và adb nhận diện được.
+    4. Thiết bị Android riêng do người dùng cung cấp và xác nhận là thiết bị
+       cô lập, không chứa dữ liệu cá nhân.
+
+Khi có target, quy trình sẽ là:
+
+    1. Khởi động mitmdump với shopee-dynamic-capture-addon.py.
+    2. Cài CA certificate của mitmproxy vào target test.
+    3. Cài APK bằng adb.
+    4. Ghi baseline khi chưa cấp permission.
+    5. Cấp từng permission/consent một cách có kiểm soát.
+    6. Mở app và thực hiện login, tìm kiếm, xem sản phẩm, thêm giỏ, contact
+       permission, installed-app consent, clipboard, location và tính năng
+       camera/NFC phù hợp.
+    7. Đối chiếu các request và payload với các model tĩnh trong báo cáo.
+    8. Nếu gặp certificate pinning, dùng Frida trên target test hợp pháp hoặc
+       chuyển sang quan sát metadata TLS/DNS/packet mà không giải mã nội dung.
+    9. Xóa proxy, CA, APK và dữ liệu test sau khi kiểm thử.
+

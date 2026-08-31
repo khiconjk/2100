@@ -1,0 +1,14 @@
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -82,5 +82,10 @@ ifdef KSU_GIT_VERSION_VALID
+ # ksu_version: major * 30000 + git version for historical reasons
++ifdef KSU_VERSION_OVERRIDE
++$(eval KSU_VERSION=$(KSU_VERSION_OVERRIDE))
++$(info -- KernelSU-Next version override: $(KSU_VERSION))
++else
+ $(eval KSU_VERSION=$(shell expr 30000 + $(KSU_GIT_VERSION) + 150))
++endif
+ $(info -- KernelSU-Next version: $(KSU_VERSION))
+ ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
+ else

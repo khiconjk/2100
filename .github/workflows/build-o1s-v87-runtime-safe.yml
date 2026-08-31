@@ -1,0 +1,274 @@
+name: V87 Baseline Build o1s KSU SuSFS R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: "Device model passed to build.sh"
+        required: true
+        default: "o1s"
+        type: choice
+        options:
+          - o1s
+          - r9s
+          - t2s
+          - p3s
+      ksu:
+        description: "KernelSU option passed to build.sh"
+        required: true
+        default: "y"
+        type: choice
+        options:
+          - "y"
+          - "N"
+      susfs:
+        description: "SuSFS option passed to build.sh"
+        required: true
+        default: "y"
+        type: choice
+        options:
+          - "y"
+          - "N"
+      recovery:
+        description: "Recovery option passed to build.sh"
+        required: true
+        default: "N"
+        type: choice
+        options:
+          - "N"
+          - "y"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: v87 baseline r2 ${{ inputs.device }} ksu-${{ inputs.ksu }} susfs-${{ inputs.susfs }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    env:
+      DEVICE: ${{ inputs.device }}
+      KSU_OPTION: ${{ inputs.ksu }}
+      SUSFS_OPTION: ${{ inputs.susfs }}
+      RECOVERY_OPTION: ${{ inputs.recovery }}
+      BUILD_LOG: build.log
+      CI_FULL_LOG: ci-full-run.log
+      CHATGPT_LOG: chatgpt-readable-build-log-v87-baseline-r2-ksu-susfs.txt
+
+    steps:
+      - name: Checkout repo without recursive submodules
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Initialize only required submodules
+        shell: bash
+        run: |
+          set +e
+          : > "$CI_FULL_LOG"
+
+          {
+            echo "===== INIT REQUIRED SUBMODULES ONLY ====="
+            echo "Reason: skip stale clang submodule http://llvm.org/git/clang.git"
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Commit: $GITHUB_SHA"
+            echo "Device: $DEVICE"
+            echo "KSU_OPTION=$KSU_OPTION"
+            echo "SUSFS_OPTION=$SUSFS_OPTION"
+            echo "RECOVERY_OPTION=$RECOVERY_OPTION"
+            echo
+
+            echo "===== .gitmodules ====="
+            cat .gitmodules 2>/dev/null || true
+            echo
+
+            echo "===== SUBMODULE INIT: KernelSU-Next + toolchain/mkbootimg ====="
+            git submodule sync -- KernelSU-Next toolchain/mkbootimg || true
+            git submodule update --init --depth=1 KernelSU-Next toolchain/mkbootimg
+            submodule_code=$?
+
+            echo "SUBMODULE_EXIT_CODE=$submodule_code"
+            echo
+
+            echo "===== SUBMODULE STATUS ====="
+            git submodule status || true
+            echo
+
+            if [ "$submodule_code" -ne 0 ]; then
+              echo "ERROR: required submodule init failed."
+              exit "$submodule_code"
+            fi
+          } 2>&1 | tee -a "$CI_FULL_LOG"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "===== INSTALL DEPENDENCIES ====="
+            sudo apt-get update
+            sudo apt-get install -y \
+              bc \
+              bison \
+              build-essential \
+              cpio \
+              flex \
+              git \
+              kmod \
+              libelf-dev \
+              libssl-dev \
+              lld \
+              llvm \
+              python3 \
+              python3-pip \
+              rsync \
+              unzip \
+              wget \
+              xz-utils \
+              zip \
+              zstd
+          } 2>&1 | tee -a "$CI_FULL_LOG"
+
+      - name: Build using v87 baseline build.sh
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+
+          {
+            echo "===== BUILD USING V87 BASELINE BUILD.SH ====="
+            echo "BUILD_START_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "Command: ./build.sh --model \"$DEVICE\" --ksu \"$KSU_OPTION\" --susfs \"$SUSFS_OPTION\" --recovery \"$RECOVERY_OPTION\""
+            echo
+
+            chmod +x ./build.sh
+
+            ./build.sh \
+              --model "$DEVICE" \
+              --ksu "$KSU_OPTION" \
+              --susfs "$SUSFS_OPTION" \
+              --recovery "$RECOVERY_OPTION"
+
+            build_code=$?
+            echo
+            echo "BUILD_EXIT_CODE=$build_code"
+            echo "BUILD_END_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            exit "$build_code"
+          } 2>&1 | tee "$BUILD_LOG" | tee -a "$CI_FULL_LOG"
+
+      - name: Collect logs and outputs
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p upload-artifacts
+
+          {
+            echo "===== COLLECT LOGS AND OUTPUTS ====="
+            echo "PWD=$(pwd)"
+            echo "Device=$DEVICE"
+            echo
+
+            echo "===== OUTPUT FILES ====="
+            find . \
+              \( -name '*.img' -o -name '*.zip' -o -name 'Image' -o -name 'Image.gz' -o -name 'vendor_boot.img' -o -name 'boot.img' -o -name 'dtbo.img' -o -name 'dtb.img' \) \
+              -type f -printf '%p %s bytes\n' 2>/dev/null | sort
+            echo
+
+            echo "===== ERROR LINES ====="
+            grep -RIn \
+              -e 'fatal error:' \
+              -e ' error:' \
+              -e 'undefined reference' \
+              -e 'No such file' \
+              -e 'Kernel compilation failed' \
+              -e 'BUILD_EXIT_CODE=' \
+              -e 'SUBMODULE_EXIT_CODE=' \
+              "$BUILD_LOG" "$CI_FULL_LOG" 2>/dev/null | tee error-lines.txt || true
+            echo
+
+            echo "===== BUILD LAST 300 LINES ====="
+            tail -300 "$BUILD_LOG" 2>/dev/null | tee build-last-300-lines.txt || true
+          } 2>&1 | tee -a "$CI_FULL_LOG"
+
+          find . \
+            \( -name '*.img' -o -name '*.zip' -o -name 'Image' -o -name 'Image.gz' -o -name 'vendor_boot.img' -o -name 'boot.img' -o -name 'dtbo.img' -o -name 'dtb.img' \) \
+            -type f -exec cp -f '{}' upload-artifacts/ \; 2>/dev/null || true
+
+          cp -f "$BUILD_LOG" upload-artifacts/ 2>/dev/null || true
+          cp -f "$CI_FULL_LOG" upload-artifacts/ 2>/dev/null || true
+          cp -f error-lines.txt upload-artifacts/ 2>/dev/null || true
+          cp -f build-last-300-lines.txt upload-artifacts/ 2>/dev/null || true
+          cp -f out/.config upload-artifacts/kernel-config.txt 2>/dev/null || true
+
+      - name: Generate ChatGPT-readable log
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          {
+            echo "Generated at UTC: $(date -u +'%Y-%m-%d %H:%M:%S')"
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Workflow: V87 Baseline Build o1s KSU SuSFS R2"
+            echo "Device: $DEVICE"
+            echo "KSU_OPTION=$KSU_OPTION"
+            echo "SUSFS_OPTION=$SUSFS_OPTION"
+            echo "RECOVERY_OPTION=$RECOVERY_OPTION"
+            echo
+
+            echo "===== SUBMODULE / BUILD EXIT MARKERS ====="
+            grep -RIn \
+              -e 'SUBMODULE_EXIT_CODE=' \
+              -e 'BUILD_EXIT_CODE=' \
+              -e 'fatal error:' \
+              -e ' error:' \
+              -e 'undefined reference' \
+              -e 'No such file' \
+              -e 'Kernel compilation failed' \
+              "$BUILD_LOG" "$CI_FULL_LOG" 2>/dev/null | head -500 || true
+            echo
+
+            echo "===== SUBMODULE STATUS ====="
+            git submodule status 2>/dev/null || true
+            echo
+
+            echo "===== OUTPUT FILES ====="
+            find . \
+              \( -name '*.img' -o -name '*.zip' -o -name 'Image' -o -name 'Image.gz' -o -name 'vendor_boot.img' -o -name 'boot.img' -o -name 'dtbo.img' -o -name 'dtb.img' \) \
+              -type f -printf '%p %s bytes\n' 2>/dev/null | sort
+            echo
+
+            echo "===== BUILD.SH OPTION CONTEXT ====="
+            grep -nE 'model|ksu|susfs|recovery|KSU_OPTION|SUSFS_OPTION|RECOVERY_OPTION|build_kernel|build_vendor_boot|build_zip' build.sh 2>/dev/null | head -220 || true
+            echo
+
+            echo "===== ERROR LINES ====="
+            cat error-lines.txt 2>/dev/null || true
+            echo
+
+            echo "===== BUILD LAST 700 LINES ====="
+            tail -700 "$BUILD_LOG" 2>/dev/null || true
+            echo
+
+            echo "===== CI FULL RUN LAST 900 LINES ====="
+            tail -900 "$CI_FULL_LOG" 2>/dev/null || true
+          } > "$CHATGPT_LOG"
+
+          cp -f "$CHATGPT_LOG" upload-artifacts/ 2>/dev/null || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v87-baseline-r2-${{ inputs.device }}-ksu-${{ inputs.ksu }}-susfs-${{ inputs.susfs }}-${{ github.run_number }}
+          path: |
+            upload-artifacts/**
+            build.log
+            ci-full-run.log
+            error-lines.txt
+            build-last-300-lines.txt
+            chatgpt-readable-build-log-v87-baseline-r2-ksu-susfs.txt
+          if-no-files-found: warn
+          retention-days: 14

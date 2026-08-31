@@ -1,0 +1,227 @@
+name: Build o1s Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - do_not_try
+    paths:
+      - ".github/workflows/build-o1s.yml"
+      - "build.sh"
+      - "arch/arm64/configs/**"
+      - "drivers/vibrator/**"
+      - "drivers/rtc/**"
+      - "kernel/**"
+      - "fs/**"
+      - "dt.configs/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
+          sudo apt-get clean
+          df -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git curl wget tar xz-utils zip unzip \
+            build-essential bc bison flex \
+            libssl-dev libelf-dev dwarves pahole \
+            python3 python3-pip \
+            cpio lz4 gzip kmod rsync ca-certificates
+
+      - name: Hard clean old build outputs
+        run: |
+          echo "===== CLEAN OLD BUILD OUTPUTS ====="
+
+          rm -rf out
+          rm -rf build/out
+          rm -rf AnyKernel3
+
+          rm -f build.log
+          rm -f Module.symvers
+          rm -f modules.order
+          rm -f .scmversion
+
+          find . -name "*.o" -delete || true
+          find . -name "*.mod" -delete || true
+          find . -name "*.mod.c" -delete || true
+          find . -name ".*.cmd" -delete || true
+          find . -name ".tmp_*" -type f -delete || true
+          find . -name "*.a" -delete || true
+
+          echo "===== AFTER CLEAN ====="
+          df -h
+          ls -la
+
+      - name: Prepare tools manually
+        run: |
+          echo "===== PREPARE TOOLS ====="
+
+          rm -rf KernelSU-Next
+          rm -rf clang
+          rm -rf toolchain/mkbootimg
+          rm -rf toolchain/libufdt
+          rm -f toolchain/mkdtimg
+
+          mkdir -p toolchain
+
+          git submodule sync -- KernelSU-Next
+          git submodule update --init --depth=1 KernelSU-Next || (git clone https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next && git -C KernelSU-Next checkout c49a6316c556f84b8e21ef3af3e1b49032b47ea0)
+          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg toolchain/mkbootimg
+          git clone --depth=1 https://android.googlesource.com/platform/system/libufdt toolchain/libufdt
+
+          echo "===== FIND MKDTIMG ====="
+          find toolchain/libufdt -type f | grep -iE "mkdt.*\.py|mkdtbo.*\.py" || true
+
+          if [ -f toolchain/libufdt/utils/src/mkdtboimg.py ]; then
+            cp -f toolchain/libufdt/utils/src/mkdtboimg.py toolchain/mkdtimg
+          elif [ -f toolchain/libufdt/utils/mkdtboimg.py ]; then
+            cp -f toolchain/libufdt/utils/mkdtboimg.py toolchain/mkdtimg
+          elif [ -f toolchain/libufdt/utils/src/mkdtimg.py ]; then
+            cp -f toolchain/libufdt/utils/src/mkdtimg.py toolchain/mkdtimg
+          elif [ -f toolchain/libufdt/utils/mkdtimg.py ]; then
+            cp -f toolchain/libufdt/utils/mkdtimg.py toolchain/mkdtimg
+          else
+            echo "ERROR: mkdtimg/mkdtboimg script not found"
+            exit 1
+          fi
+
+          chmod +x toolchain/mkdtimg
+
+          echo "===== TOOLCHAIN FILES ====="
+          ls -l toolchain/mkdtimg
+          ls -la toolchain/mkbootimg | head
+
+      - name: Cache clang
+        uses: actions/cache@v5
+        with:
+          path: toolchain/clang-r596125
+          key: clang-r596125-linux-x86-stable-v2
+
+      - name: Setup clang
+        run: |
+          echo "===== SETUP CLANG ====="
+
+          if [ ! -x "toolchain/clang-r596125/bin/clang" ]; then
+            echo "Clang not found, downloading..."
+
+            rm -rf toolchain/clang-r596125
+            rm -f toolchain/clang.tar.gz
+
+            mkdir -p toolchain/clang-r596125
+
+            wget -O toolchain/clang.tar.gz \
+              "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
+
+            tar -xf toolchain/clang.tar.gz -C toolchain/clang-r596125
+          fi
+
+          toolchain/clang-r596125/bin/clang --version
+
+      - name: Verify vibrator is clean
+        run: |
+          echo "===== CHECK VIBRATOR PATCH TRACE ====="
+
+          if grep -RniE "GHOST_DISABLE_VIBRATOR|DISABLE VIBRATOR|force motor OFF|haptic packet blocked|haptic enable blocked|block all enable requests" \
+            drivers/vibrator build.sh 2>/dev/null; then
+            echo "ERROR: vibrator no-op trace still exists"
+            exit 1
+          fi
+
+          echo "===== CHECK VIBRATOR SOURCE ====="
+          grep -RniE "vib_ops->enable|max77705_vibrator_i2c_enable|max77705_vibrator_enable|max77705_update_reg|MOTOR_EN|pwm_enable|CONFIG_MAX77705_VIBRATOR" \
+            drivers/vibrator arch/arm64/configs/o1s.config 2>/dev/null || true
+
+          echo "Vibrator source looks clean."
+
+      - name: Patch build.sh safety fixes
+        run: |
+          echo "===== PATCH BUILD.SH SAFETY FIXES ====="
+          chmod +x build.sh
+
+      - name: Final clean before build
+        run: |
+          echo "===== FINAL CLEAN BEFORE BUILD ====="
+
+          rm -rf out
+          rm -rf build/out
+          rm -f build.log
+
+          find . -name "*.o" -delete || true
+          find . -name "*.mod" -delete || true
+          find . -name "*.mod.c" -delete || true
+          find . -name ".*.cmd" -delete || true
+          find . -name ".tmp_*" -type f -delete || true
+          find . -name "*.a" -delete || true
+
+          mkdir -p build/out
+
+          echo "Clean done."
+
+      - name: Build kernel
+        run: |
+          echo "===== BUILD o1s KERNEL ====="
+          bash build.sh -m o1s -k y -s y -r n 2>&1 | tee build.log
+
+      - name: Verify fresh outputs
+        if: always()
+        run: |
+          echo "===== OUTPUT FILES ====="
+          find build/out/o1s -type f | sort || true
+
+          echo "===== VIBRATOR MODULES IN OUTPUT ====="
+          find build/out/o1s -type f | grep -iE "vib|haptic|max77705|sec_vibrator|\.ko" | sort || true
+
+          echo "===== IMPORTANT ARTIFACTS ====="
+          ls -lh build/out/o1s/Image 2>/dev/null || true
+          ls -lh build/out/o1s/boot.img 2>/dev/null || true
+          ls -lh build/out/o1s/vendor_boot.img 2>/dev/null || true
+          ls -lh build/out/o1s/dtb.img 2>/dev/null || true
+          ls -lh build/out/o1s/dtbo.img 2>/dev/null || true
+          ls -lh build/out/o1s/*.zip 2>/dev/null || true
+
+          echo "===== ERROR LINES ====="
+          grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED\|abort\|SecurityException" build.log | head -250 || true
+
+          echo "===== LAST 250 LINES ====="
+          tail -250 build.log || true
+
+      - name: Fail if vendor_boot missing
+        run: |
+          if [ ! -f build/out/o1s/vendor_boot.img ]; then
+            echo "ERROR: vendor_boot.img not found."
+            echo "Vibrator modules are usually inside vendor_boot/vendor ramdisk."
+            echo "If you flash only Image/boot.img, old vibrator module may still be used."
+            exit 1
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: o1s-kernel-clean-build
+          path: |
+            build.log
+            build/out/o1s/Image
+            build/out/o1s/*.img
+            build/out/o1s/*.zip
+            build/out/o1s/modules/**
+          if-no-files-found: warn

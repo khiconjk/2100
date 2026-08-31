@@ -1,0 +1,161 @@
+name: Build o1s Ghost MAC Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Device Model"
+        required: true
+        default: "o1s"
+        type: choice
+        options:
+          - "o1s"
+          - "t2s"
+          - "p3s"
+      ksu:
+        description: "Include KernelSU-Next"
+        required: true
+        default: "y"
+        type: choice
+        options:
+          - "y"
+          - "N"
+      susfs:
+        description: "Apply SuSFS with KernelSU-Next"
+        required: true
+        default: "y"
+        type: choice
+        options:
+          - "y"
+          - "N"
+      recovery:
+        description: "Build Android Recovery image"
+        required: true
+        default: "N"
+        type: choice
+        options:
+          - "N"
+          - "y"
+  push:
+    branches:
+      - ghost-mac
+      - do_not_try
+    paths-ignore:
+      - "README.md"
+      - ".gitignore"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ghost-mac-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.model || 'o1s' }} Ghost Kernel
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    env:
+      MODEL_ARG: ${{ github.event.inputs.model || 'o1s' }}
+      KSU_ARG: ${{ github.event.inputs.ksu || 'y' }}
+      SUSFS_ARG: ${{ github.event.inputs.susfs || 'y' }}
+      RECOVERY_ARG: ${{ github.event.inputs.recovery || 'N' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Free runner disk space
+        run: |
+          echo "===== FREE DISK SPACE ====="
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
+          sudo apt-get clean
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          echo "===== INSTALL DEPENDENCIES ====="
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            bc bison build-essential cpio curl flex git kmod libelf-dev libssl-dev \
+            lld llvm pahole python3 python3-pip rsync tar unzip wget xz-utils zip
+
+      - name: Initialize submodules
+        run: |
+          echo "===== INIT SUBMODULES ====="
+          git submodule sync -- toolchain/mkbootimg
+          git submodule update --init --depth=1 toolchain/mkbootimg || true
+
+          if [ "$KSU_ARG" = "y" ]; then
+            git submodule sync -- KernelSU-Next
+            git submodule update --init --depth=1 KernelSU-Next || true
+          fi
+
+      - name: Cache Clang Toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchain/clang-r596125
+          key: clang-r596125-linux-x86-v1
+
+      - name: Setup and verify Clang
+        run: |
+          echo "===== SETUP CLANG ====="
+          CLANG_DIR="$PWD/toolchain/clang-r596125"
+          if [ ! -x "$CLANG_DIR/bin/clang" ]; then
+            echo "Clang not cached or incomplete, downloading..."
+            rm -rf "$CLANG_DIR"
+            mkdir -p "$CLANG_DIR"
+            wget -q --show-progress -O toolchain/clang.tar.gz \
+              "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
+            tar -xf toolchain/clang.tar.gz -C "$CLANG_DIR"
+            rm -f toolchain/clang.tar.gz
+          fi
+          "$CLANG_DIR/bin/clang" --version
+
+      - name: Build Kernel
+        run: |
+          echo "===== BUILD KERNEL ====="
+          chmod +x build.sh
+          set -o pipefail
+          ./build.sh --model "$MODEL_ARG" --ksu "$KSU_ARG" --susfs "$SUSFS_ARG" --recovery "$RECOVERY_ARG" 2>&1 | tee build.log
+
+      - name: Package Odin Flashable Tar (.tar.md5)
+        run: |
+          echo "===== PACKAGE ODIN TAR ====="
+          OUT_DIR="build/out/$MODEL_ARG"
+          if [ ! -f "$OUT_DIR/boot.img" ]; then
+            echo "ERROR: $OUT_DIR/boot.img was not generated! Kernel compilation failed."
+            exit 1
+          fi
+          cd "$OUT_DIR"
+          TAR_NAME="boot-${MODEL_ARG}-ghost-mac.tar"
+          FILES_TO_TAR="boot.img"
+          [ -f "dtbo.img" ] && FILES_TO_TAR="$FILES_TO_TAR dtbo.img"
+          [ -f "vendor_boot.img" ] && FILES_TO_TAR="$FILES_TO_TAR vendor_boot.img"
+
+          tar -H ustar -c $FILES_TO_TAR > "$TAR_NAME"
+          md5sum -t "$TAR_NAME" >> "$TAR_NAME"
+          mv "$TAR_NAME" "${TAR_NAME}.md5"
+          echo "Created ${TAR_NAME}.md5 successfully:"
+          ls -lh "${TAR_NAME}.md5"
+
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.MODEL_ARG }}-ghost-kernel-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            build.log
+            build/out/${{ env.MODEL_ARG }}/Image
+            build/out/${{ env.MODEL_ARG }}/*.img
+            build/out/${{ env.MODEL_ARG }}/*.zip
+            build/out/${{ env.MODEL_ARG }}/*.tar.md5

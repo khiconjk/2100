@@ -1,0 +1,10 @@
+make[1]: Entering directory '/home/khiconjk/kernel_build/kernel_buildandroid_kernel_samsung_ex2100/out'
+***
+*** Configuration file ".config" not found!
+***
+*** Please run some configurator (e.g. "make oldconfig" or
+*** "make menuconfig" or "make xconfig").
+***
+make[1]: *** [/home/khiconjk/kernel_build/kernel_buildandroid_kernel_samsung_ex2100/Makefile:693: .config] Error 1
+make[1]: Leaving directory '/home/khiconjk/kernel_build/kernel_buildandroid_kernel_samsung_ex2100/out'
+make: *** [Makefile:186: sub-make] Error 2
