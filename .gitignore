@@ -38,10 +38,7 @@ ghost-uptime-v100-project-handoff/
 __pycache__/
 /modules/
 .scmversion
-Image
-boot_ramdisk*
-vendor_ramdisk*
-ps_dump.txt
+"\357\201\234/"
 out/
 
 # Whitelist all AnyKernel3 All-In-One payload files
