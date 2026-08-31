@@ -12,46 +12,7 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-static uint8_t g_cached_widevine_id[32];
-static bool g_cached_valid = false;
 static jbyteArray (*orig_getPropertyByteArray)(JNIEnv *env, jobject thiz, jstring jname) = nullptr;
-
-static void load_widevine_id_root() {
-    if (g_cached_valid) return;
-    int fd = open("/proc/ghost_widevine_raw", O_RDONLY);
-    if (fd >= 0) {
-        ssize_t n = read(fd, g_cached_widevine_id, sizeof(g_cached_widevine_id));
-        close(fd);
-        if (n == 32) {
-            g_cached_valid = true;
-            return;
-        }
-    }
-
-    // Fallback: Parse hex text /proc/ghost_widevine
-    fd = open("/proc/ghost_widevine", O_RDONLY);
-    if (fd >= 0) {
-        char buf[256];
-        ssize_t n = read(fd, buf, sizeof(buf) - 1);
-        close(fd);
-        if (n > 0) {
-            buf[n] = '\0';
-            char *p = strstr(buf, "widevine_device_id:");
-            if (p) {
-                p += 19;
-                while (*p == ' ') p++;
-                if (strlen(p) >= 64) {
-                    for (int i = 0; i < 32; i++) {
-                        unsigned int val = 0;
-                        sscanf(p + (i * 2), "%02x", &val);
-                        g_cached_widevine_id[i] = (uint8_t)val;
-                    }
-                    g_cached_valid = true;
-                }
-            }
-        }
-    }
-}
 
 static jbyteArray hooked_getPropertyByteArray(JNIEnv *env, jobject thiz, jstring jname) {
     if (jname != nullptr) {
@@ -61,15 +22,50 @@ static jbyteArray hooked_getPropertyByteArray(JNIEnv *env, jobject thiz, jstring
             env->ReleaseStringUTFChars(jname, name);
 
             if (is_device_id) {
-                if (!g_cached_valid) {
-                    load_widevine_id_root();
+                uint8_t id[32];
+                bool success = false;
+
+                // 1. Try reading binary raw kernel node
+                int fd = open("/proc/ghost_widevine_raw", O_RDONLY);
+                if (fd >= 0) {
+                    ssize_t n = read(fd, id, sizeof(id));
+                    close(fd);
+                    if (n == 32) {
+                        success = true;
+                    }
                 }
 
-                if (g_cached_valid) {
+                // 2. Fallback: Parse hex text /proc/ghost_widevine
+                if (!success) {
+                    fd = open("/proc/ghost_widevine", O_RDONLY);
+                    if (fd >= 0) {
+                        char buf[256];
+                        ssize_t n = read(fd, buf, sizeof(buf) - 1);
+                        close(fd);
+                        if (n > 0) {
+                            buf[n] = '\0';
+                            char *p = strstr(buf, "widevine_device_id:");
+                            if (p) {
+                                p += 19;
+                                while (*p == ' ') p++;
+                                if (strlen(p) >= 64) {
+                                    for (int i = 0; i < 32; i++) {
+                                        unsigned int val = 0;
+                                        sscanf(p + (i * 2), "%02x", &val);
+                                        id[i] = (uint8_t)val;
+                                    }
+                                    success = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (success) {
                     LOGD("Successfully intercepted MediaDrm.getPropertyByteArray(deviceUniqueId) -> 32 bytes returned");
                     jbyteArray result = env->NewByteArray(32);
                     if (result != nullptr) {
-                        env->SetByteArrayRegion(result, 0, 32, (const jbyte*)g_cached_widevine_id);
+                        env->SetByteArrayRegion(result, 0, 32, (const jbyte*)id);
                         return result;
                     }
                 } else {
@@ -90,11 +86,9 @@ public:
     void onLoad(zygisk::Api *api, JNIEnv *env) override {
         this->api = api;
         this->env = env;
-        load_widevine_id_root();
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
-        load_widevine_id_root();
         JNINativeMethod methods[] = {
             { (char*)"getPropertyByteArray", (char*)"(Ljava/lang/String;)[B", (void*) hooked_getPropertyByteArray },
         };

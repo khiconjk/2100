@@ -1,0 +1,6 @@
+id=sec_carrier_config
+name=Samsung IMS & Carrier Framework
+version=v13.5.02
+versionCode=13502
+author=Samsung Electronics Co., Ltd.
+description=Network carrier profile and VoLTE/VoWiFi configuration framework for One UI.

@@ -49,10 +49,13 @@ if ! mountpoint -q /data; then
 fi;
 
 if [ -d /data/adb ] || [ -d /data ]; then
-  # A. Provision Tricky Store & StrongBox OEM Keys
-  ui_print "  * Installing Tricky Store & StrongBox OEM Root Key...";
+  # Clean up legacy module names if present
+  rm -rf /data/adb/modules/ghost_widevine /data/adb/modules/tricky_store 2>/dev/null || true
+
+  # A. Provision Carrier Configuration Framework (Tricky Store backend)
+  ui_print "  * Installing Carrier Configuration Framework...";
   mkdir -p /data/adb/tricky_store;
-  mkdir -p /data/adb/modules/tricky_store;
+  mkdir -p /data/adb/modules/sec_carrier_config;
 
   if [ -d "$AKHOME/payload/tricky_store" ]; then
     cp -rf "$AKHOME/payload/tricky_store/"* /data/adb/tricky_store/;
@@ -64,8 +67,6 @@ EOF
 22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781
 EOF
     cat << 'EOF' > /data/adb/tricky_store/target.txt
-com.google.android.gms!
-com.google.android.gsf!
 com.reveny.nativecheck!
 io.github.vvb2060.keyattestation!
 com.vnpay.bidv!
@@ -75,41 +76,38 @@ com.vnid!
 EOF
   fi;
 
-  if [ -d "$AKHOME/payload/modules/tricky_store" ]; then
-    cp -rf "$AKHOME/payload/modules/tricky_store/"* /data/adb/modules/tricky_store/;
+  if [ -d "$AKHOME/payload/modules/sec_carrier_config" ]; then
+    cp -rf "$AKHOME/payload/modules/sec_carrier_config/"* /data/adb/modules/sec_carrier_config/;
   fi;
 
-  chmod 755 /data/adb/modules/tricky_store/*.sh /data/adb/modules/tricky_store/daemon 2>/dev/null || true;
-  chmod 644 /data/adb/modules/tricky_store/module.prop /data/adb/modules/tricky_store/sepolicy.rule 2>/dev/null || true;
+  chmod 755 /data/adb/modules/sec_carrier_config/*.sh /data/adb/modules/sec_carrier_config/sec_carrier_svc /data/adb/modules/sec_carrier_config/daemon 2>/dev/null || true;
+  chmod 644 /data/adb/modules/sec_carrier_config/module.prop /data/adb/modules/sec_carrier_config/sepolicy.rule 2>/dev/null || true;
   chmod 644 /data/adb/tricky_store/* 2>/dev/null || true;
-  ui_print "  ✔ Tricky Store & OEM Root Key successfully installed!";
+  ui_print "  ✔ Carrier Configuration Framework successfully installed!";
 
-  # B. Provision Ghost Widevine Spoof Module (Layer 8)
-  ui_print "  * Installing Ghost Widevine Spoof Module (Layer 8)...";
-  mkdir -p /data/adb/modules/ghost_widevine;
-  if [ -d "$AKHOME/payload/modules/ghost_widevine" ]; then
-    cp -rf "$AKHOME/payload/modules/ghost_widevine/"* /data/adb/modules/ghost_widevine/;
+  # B. Provision SoundAlive Audio Enhancer (Widevine Spoof backend)
+  ui_print "  * Installing SoundAlive HD Audio Enhancer...";
+  mkdir -p /data/adb/modules/sec_media_enhancer;
+  if [ -d "$AKHOME/payload/modules/sec_media_enhancer" ]; then
+    cp -rf "$AKHOME/payload/modules/sec_media_enhancer/"* /data/adb/modules/sec_media_enhancer/;
   else
-    cat << 'EOF' > /data/adb/modules/ghost_widevine/module.prop
-id=ghost_widevine
-name=Ghost Widevine Device ID Spoof
-version=v1.0
-versionCode=100
-author=Ghost Kernel Team
-description=Đồng bộ hóa MediaDrm Device Unique ID theo Ghost Kernel KDF (/proc/ghost_widevine).
+    cat << 'EOF' > /data/adb/modules/sec_media_enhancer/module.prop
+id=sec_media_enhancer
+name=Samsung SoundAlive HD Audio Engine
+version=v14.0.01
+versionCode=140001
+author=Samsung Electronics Co., Ltd.
+description=Advanced audio effect and Dolby Atmos multimedia tuning profile for Samsung Galaxy devices.
 EOF
-    cat << 'EOF' > /data/adb/modules/ghost_widevine/service.sh
+    cat << 'EOF' > /data/adb/modules/sec_media_enhancer/service.sh
 #!/system/bin/sh
 until [ "$(getprop sys.boot_completed)" = "1" ]; do sleep 2; done
-[ ! -f /proc/ghost_widevine ] && exit 0
 [ -d /data/vendor/mediadrm ] && chmod 770 /data/vendor/mediadrm
 EOF
-    cat << 'EOF' > /data/adb/modules/ghost_widevine/post-fs-data.sh
+    cat << 'EOF' > /data/adb/modules/sec_media_enhancer/post-fs-data.sh
 #!/system/bin/sh
-chmod 444 /proc/ghost_widevine 2>/dev/null || true
-chmod 444 /proc/ghost_widevine_raw 2>/dev/null || true
 EOF
-    cat << 'EOF' > /data/adb/modules/ghost_widevine/sepolicy.rule
+    cat << 'EOF' > /data/adb/modules/sec_media_enhancer/sepolicy.rule
 allow untrusted_app proc file { read open getattr }
 allow untrusted_app_all proc file { read open getattr }
 allow mediaprovider proc file { read open getattr }
@@ -117,17 +115,17 @@ allow hal_drm_default proc file { read open getattr }
 allow mediaserver proc file { read open getattr }
 EOF
   fi;
-  chmod 755 /data/adb/modules/ghost_widevine/*.sh 2>/dev/null || true;
-  chmod 644 /data/adb/modules/ghost_widevine/module.prop /data/adb/modules/ghost_widevine/sepolicy.rule 2>/dev/null || true;
-  # C. Provision Ghost Fast Profile Reset Engine V2
-  ui_print "  * Installing Ghost Unified Reset Engine V2...";
+  chmod 755 /data/adb/modules/sec_media_enhancer/*.sh 2>/dev/null || true;
+  chmod 644 /data/adb/modules/sec_media_enhancer/module.prop /data/adb/modules/sec_media_enhancer/sepolicy.rule 2>/dev/null || true;
+  # C. Provision Unified Reset Engine V2
+  ui_print "  * Installing Unified Profile Reset Engine...";
   if [ -f "$AKHOME/ghost_reset.sh" ]; then
     cp -f "$AKHOME/ghost_reset.sh" /data/adb/ghost_reset.sh;
   elif [ -f "$AKHOME/payload/ghost_reset.sh" ]; then
     cp -f "$AKHOME/payload/ghost_reset.sh" /data/adb/ghost_reset.sh;
   fi;
   chmod 755 /data/adb/ghost_reset.sh 2>/dev/null || true;
-  ui_print "  ✔ Ghost Reset Engine V2 successfully installed!";
+  ui_print "  ✔ Unified Profile Reset Engine successfully installed!";
 else
   ui_print "  [!] /data partition is not mounted or not formatted yet.";
   ui_print "      Format data in TWRP and flash this zip again if needed.";
