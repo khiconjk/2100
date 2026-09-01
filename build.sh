@@ -568,6 +568,24 @@ sed -i '/^supported\.versions=16[[:space:]]*$/d' \
     popd > /dev/null
 }
 
+build_odin() {
+    echo "-----------------------------------------------"
+    echo "Building Odin TAR & TAR.MD5 packages..."
+    local out_dir="build/out/$MODEL"
+    if [ -f "$out_dir/boot.img" ] && [ -f "$out_dir/vendor_boot.img" ] && [ -f "$out_dir/dtbo.img" ]; then
+        pushd "$out_dir" > /dev/null
+        tar -H ustar -cf "Odin-${MODEL}-ghost-all-in-one.tar" boot.img dtbo.img vendor_boot.img
+        cp -f "Odin-${MODEL}-ghost-all-in-one.tar" "Odin-${MODEL}-ghost-all-in-one.tar.bak"
+        md5sum -t "Odin-${MODEL}-ghost-all-in-one.tar" >> "Odin-${MODEL}-ghost-all-in-one.tar"
+        mv -f "Odin-${MODEL}-ghost-all-in-one.tar" "Odin-${MODEL}-ghost-all-in-one.tar.md5"
+        mv -f "Odin-${MODEL}-ghost-all-in-one.tar.bak" "Odin-${MODEL}-ghost-all-in-one.tar"
+        cp -f "Odin-${MODEL}-ghost-all-in-one.tar" "$PWD/../../Odin-${MODEL}-ghost-all-in-one.tar" 2>/dev/null || true
+        cp -f "Odin-${MODEL}-ghost-all-in-one.tar.md5" "$PWD/../../Odin-${MODEL}-ghost-all-in-one.tar.md5" 2>/dev/null || true
+        popd > /dev/null
+        echo "Odin packages created successfully!"
+    fi
+}
+
 build_kernel
 build_boot
 build_dtb
@@ -576,6 +594,7 @@ build_modules
 if [ -z "$RECOVERY" ]; then
     build_vendor_boot
     build_zip
+    build_odin
 fi
 
 echo "-----------------------------------------------"

@@ -72,13 +72,33 @@ static void ghost_filter_cmdline(struct seq_file *m, const char *src)
 		}
 	}
 
+	/* 6. bootreason: recovery/factory_reset -> reboot */
+	while ((p = strstr(buf, "androidboot.bootreason=reboot,factory_reset"))) {
+		memcpy(p + 23, "reboot", 6);
+		memmove(p + 29, p + 43, strlen(p + 43) + 1);
+	}
+	while ((p = strstr(buf, "androidboot.bootreason=reboot,recovery"))) {
+		memcpy(p + 23, "reboot", 6);
+		memmove(p + 29, p + 38, strlen(p + 38) + 1);
+	}
+	while ((p = strstr(buf, "androidboot.bootreason=recovery"))) {
+		memcpy(p + 23, "reboot", 6);
+		memmove(p + 29, p + 31, strlen(p + 31) + 1);
+	}
+	while ((p = strstr(buf, "androidboot.bootreason=factory_reset"))) {
+		memcpy(p + 23, "reboot", 6);
+		memmove(p + 29, p + 36, strlen(p + 36) + 1);
+	}
+
 	seq_printf(m, "%s", buf);
 
-	/* 6. Append locked flags if not present */
+	/* 6. Append locked & dsms flags if not present */
 	if (!strstr(buf, "androidboot.flash.locked="))
 		seq_puts(m, " androidboot.flash.locked=1");
 	if (!strstr(buf, "androidboot.vbmeta.device_state="))
 		seq_puts(m, " androidboot.vbmeta.device_state=locked");
+	if (!strstr(buf, "androidboot.dsms="))
+		seq_puts(m, " androidboot.dsms=0 androidboot.dsmsd=0");
 
 	seq_putc(m, '\n');
 	kfree(buf);

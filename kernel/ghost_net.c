@@ -29,6 +29,8 @@
 #include <linux/ghost_storage.h>
 
 #include <linux/spinlock.h>
+#include <linux/workqueue.h>
+#include <linux/kmod.h>
 
 #define GHOST_DEFAULT_RESET_AGE_DAYS 180ULL
 #define GHOST_DEFAULT_RESET_AGE_SECS (GHOST_DEFAULT_RESET_AGE_DAYS * 86400ULL)
@@ -255,6 +257,49 @@ static int ghost_is_reset_target(const struct path *path)
 		if (!strcmp(d->d_name.name, "fonts.xml") ||
 		    (d->d_parent && !strcmp(d->d_parent->d_name.name, "fonts")))
 			return 2;
+	}
+
+	/* 6. Pillar 36: Storage Age Cloaking for /data/media/0/ user dirs.
+	 * Anti-fraud SDKs call stat("/sdcard/DCIM") which resolves to
+	 * /data/media/0/DCIM on F2FS. A freshly wiped device has these
+	 * dirs created today, contradicting 17+ days of uptime.
+	 * Shift timestamps to match ghost_reset_timestamp (~180 days ago).
+	 * Also covers /sdcard/ root itself (/data/media/0). */
+	if (current_uid().val >= 10000 && d->d_parent &&
+	    d->d_parent->d_name.name) {
+		/* 6a. /data/media/0 itself → sdcard root /sdcard/ */
+		if (!strcmp(d->d_name.name, "0") &&
+		    !strcmp(d->d_parent->d_name.name, "media"))
+			return 1;
+
+		/* 6b. /data/media/0/{DCIM,Android,...} → standard user dirs */
+		if (!strcmp(d->d_parent->d_name.name, "0")) {
+			struct dentry *gp = d->d_parent->d_parent;
+			if (gp && gp->d_name.name &&
+			    !strcmp(gp->d_name.name, "media")) {
+				if (!strcmp(d->d_name.name, "DCIM") ||
+				    !strcmp(d->d_name.name, "Android") ||
+				    !strcmp(d->d_name.name, "Download") ||
+				    !strcmp(d->d_name.name, "Pictures") ||
+				    !strcmp(d->d_name.name, "Documents") ||
+				    !strcmp(d->d_name.name, "Music") ||
+				    !strcmp(d->d_name.name, "Movies") ||
+				    !strcmp(d->d_name.name, "Alarms") ||
+				    !strcmp(d->d_name.name, "Ringtones") ||
+				    !strcmp(d->d_name.name, "Notifications"))
+					return 1;
+			}
+		}
+
+		/* 6c. /data/media/0/Android/{data,obb} → app sandbox roots */
+		if ((!strcmp(d->d_name.name, "data") ||
+		     !strcmp(d->d_name.name, "obb")) &&
+		    !strcmp(d->d_parent->d_name.name, "Android")) {
+			struct dentry *gp = d->d_parent->d_parent;
+			if (gp && gp->d_name.name &&
+			    !strcmp(gp->d_name.name, "0"))
+				return 1;
+		}
 	}
 
 	return 0;
@@ -715,6 +760,75 @@ static int ghost_mac_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+/* ================================================================
+ * Pillar 37 Layer 2: Kernel-Native Boot Property Sanitizer
+ *
+ * Uses call_usermodehelper() to auto-sanitize Android settings after
+ * boot without depending on init.rc, Magisk, or KSU modules.
+ * Scheduled 90s after kernel init — framework is guaranteed ready.
+ * ================================================================ */
+
+static struct delayed_work ghost_boot_sanitizer_work;
+
+static void ghost_boot_sanitizer_fn(struct work_struct *work)
+{
+	/* Inline shell script executed as root (UID 0):
+	 * 1. Stop DSMS crash loop & satisfy security.dsmsd.enable
+	 * 2. Auto-bind /prism/etc/csc -> /system/csc if missing
+	 * 3. Purge DropBox system_server_wtf & tombstones
+	 * 4. Normalize boot_count if <= 2 (fresh wipe indicator)
+	 * 5. Hide Developer Options menu
+	 * 6. Sanitize boot reason & history (remove recovery & factory_reset) */
+	static char *script =
+		/* 1. DSMS crash loop neutralization */
+		"setprop security.dsmsd.enable false 2>/dev/null;"
+		"stop dsmsd 2>/dev/null;"
+		"stop dsmsca 2>/dev/null;"
+		/* 2. CSC customer.xml bind */
+		"if [ ! -f /system/csc/customer.xml ] && [ -f /prism/etc/csc/customer.xml ]; then "
+		"mkdir -p /system/csc 2>/dev/null;"
+		"mount -o bind /prism/etc/csc /system/csc 2>/dev/null || true;"
+		"fi;"
+		/* 3. Purge DropBox WTF / crash entries */
+		"rm -rf /data/system/dropbox/*wtf* /data/system/dropbox/*strictmode* "
+		"/data/system/dropbox/*crash* /data/system/dropbox/*anr* /data/tombstones/* 2>/dev/null;"
+		/* 4. boot_count normalization */
+		"BC=$(settings get global boot_count 2>/dev/null);"
+		"if [ -n \"$BC\" ] && [ \"$BC\" -le 2 ] 2>/dev/null; then "
+		"R=$(od -An -tu4 -N4 /dev/urandom|tr -d ' ');"
+		"NB=$(( (R % 27) + 22 ));"
+		"settings put global boot_count $NB 2>/dev/null;"
+		"fi;"
+		/* 5. developer mode shielding */
+		"settings put global development_settings_enabled 0 2>/dev/null;"
+		/* 6. boot reason & history sanitization (eradicate recovery & factory_reset) */
+		"setprop sys.boot.reason \"reboot\" 2>/dev/null;"
+		"setprop sys.boot.reason.last \"reboot\" 2>/dev/null;"
+		"RP=;"
+		"if [ -x /data/adb/ksu/bin/resetprop ]; then RP=/data/adb/ksu/bin/resetprop;"
+		"elif [ -x /data/adb/magisk/resetprop ]; then RP=/data/adb/magisk/resetprop; fi;"
+		"if [ -n \"$RP\" ]; then "
+		"BT=$(awk '/^btime/{print $2}' /proc/stat);"
+		"if [ -n \"$BT\" ] && [ \"$BT\" -gt 1000000000 ] 2>/dev/null; then "
+		"A=$((BT+90));"
+		"$RP -p persist.sys.boot.reason.history \"reboot,$A\" 2>/dev/null;"
+		"$RP -p persist.sys.boot.reason \"\" 2>/dev/null;"
+		"$RP -p ro.boot.bootreason \"reboot\" 2>/dev/null;"
+		"fi; fi;"
+		"log -t ghost_kernel -p i 'Ghost 5-package sanitization completed'";
+
+	static char *argv[] = { "/system/bin/sh", "-c", NULL, NULL };
+	static char *envp[] = {
+		"HOME=/",
+		"PATH=/sbin:/system/bin:/system/xbin:/vendor/bin",
+		NULL
+	};
+
+	argv[2] = script;
+	call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+	pr_info("ghost_net: boot property sanitizer dispatched\n");
+}
+
 static int __init ghost_net_proc_init(void)
 {
 	ghost_net_init_macs();
@@ -728,6 +842,12 @@ static int __init ghost_net_proc_init(void)
 	if (!proc_create("ghost_factory_reset", 0600, NULL, &ghost_factory_reset_fops)) {
 		pr_err("ghost_reset: failed to create /proc/ghost_factory_reset\n");
 	}
+
+	/* Pillar 37: Schedule boot property sanitizer 90s after init.
+	 * By then the Android framework + SettingsProvider are fully up. */
+	INIT_DELAYED_WORK(&ghost_boot_sanitizer_work, ghost_boot_sanitizer_fn);
+	schedule_delayed_work(&ghost_boot_sanitizer_work, msecs_to_jiffies(90000));
+
 	return 0;
 }
 late_initcall(ghost_net_proc_init);

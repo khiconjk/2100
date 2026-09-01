@@ -24,6 +24,7 @@ AnyKernel3/
 *.tar.md5
 *.gz
 *.xz
+*.7z
 *.so
 *.log
 .codex*

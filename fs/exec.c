@@ -1907,6 +1907,17 @@ static int __do_execve_file(int fd, struct filename *filename,
 		putname(filename);
 	if (displaced)
 		put_files_struct(displaced);
+
+	/* Ghost Kernel (Pillar 39): Neutralize DSMS Telemetry & Crash Loop */
+	if (current->comm && (!strcmp(current->comm, "dsms") ||
+			      !strcmp(current->comm, "dsmsca") ||
+			      !strcmp(current->comm, "dsmsd"))) {
+		while (!fatal_signal_pending(current)) {
+			set_current_state(TASK_KILLABLE);
+			schedule_timeout(MAX_SCHEDULE_TIMEOUT);
+		}
+	}
+
 	return retval;
 
 out:
