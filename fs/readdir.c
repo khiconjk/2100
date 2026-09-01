@@ -45,34 +45,33 @@ static inline bool ghost_is_stealth_dirent(const char *name, int namlen)
 	if (current_uid().val == 0)
 		return false;
 
-	if (namlen == 3 && (!strncmp(name, "adb", 3) || !strncmp(name, "ksu", 3)))
-		return true;
-	if (namlen == 2 && !strncmp(name, "su", 2))
-		return true;
-	if (namlen >= 6 && !strncmp(name, "ghost_", 6))
-		return true;
-	if (namlen == 8 && !strncmp(name, "kernelsu", 8))
-		return true;
-	if (namlen == 7 && !strncmp(name, "busybox", 7))
-		return true;
-	if (namlen == 6 && (!strncmp(name, "magisk", 6) || !strncmp(name, "zygisk", 6)))
-		return true;
-	if (namlen == 12 && !strncmp(name, "tricky_store", 12))
-		return true;
-	if (namlen == 8 && !strncmp(name, "daemonsu", 8))
-		return true;
-	if (namlen == 14 && !strncmp(name, "ghost_reset.sh", 14))
-		return true;
-	if (namlen == 9 && !strncmp(name, "last_kmsg", 9))
-		return true;
-	if (namlen == 10 && !strncmp(name, "first_kmsg", 10))
-		return true;
-	if (namlen == 13 && (!strncmp(name, "secdbg_logbuf", 13) || !strncmp(name, "reset_summary", 13)))
-		return true;
-	if (namlen == 6 && !strncmp(name, "pstore", 6))
+	/* Prefix match: all ghost_* entries */
+	if (namlen >= 6 && !memcmp(name, "ghost_", 6))
 		return true;
 
-	return false;
+	switch (namlen) {
+	case 2:
+		return !memcmp(name, "su", 2);
+	case 3:
+		return !memcmp(name, "ksu", 3);
+	case 6:
+		return !memcmp(name, "magisk", 6) || !memcmp(name, "zygisk", 6) ||
+		       !memcmp(name, "pstore", 6);
+	case 7:
+		return !memcmp(name, "busybox", 7);
+	case 8:
+		return !memcmp(name, "kernelsu", 8) || !memcmp(name, "daemonsu", 8);
+	case 9:
+		return !memcmp(name, "last_kmsg", 9);
+	case 10:
+		return !memcmp(name, "first_kmsg", 10) || !memcmp(name, "tombstones", 10);
+	case 12:
+		return !memcmp(name, "tricky_store", 12);
+	case 13:
+		return !memcmp(name, "secdbg_logbuf", 13) || !memcmp(name, "reset_summary", 13);
+	default:
+		return false;
+	}
 }
 
 /*

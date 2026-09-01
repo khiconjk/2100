@@ -457,6 +457,7 @@ void ghost_filter_vfs_read_payload(struct file *file, char __user *buf, size_t r
 	if (strcmp(name, "HwParamData") == 0 || strcmp(name, "HwPartInform") == 0 ||
 	    strcmp(name, "BarCode") == 0 || strcmp(name, "mps_code.dat") == 0 ||
 	    strcmp(name, "imei") == 0) {
+		bool sn_mod, imei_mod;
 		copy_len = min_t(size_t, ret, 4096);
 		kbuf = kmalloc(copy_len + 1, GFP_KERNEL);
 		if (!kbuf)
@@ -468,8 +469,9 @@ void ghost_filter_vfs_read_payload(struct file *file, char __user *buf, size_t r
 		}
 		kbuf[copy_len] = '\0';
 
-		if (ghost_scan_and_replace_r5_serial((u8 *)kbuf, copy_len, ghost_serialno, strlen(ghost_serialno)) |
-		    ghost_scan_and_replace_imei((u8 *)kbuf, copy_len, ghost_get_imei(), ghost_get_imei2())) {
+		sn_mod = ghost_scan_and_replace_r5_serial((u8 *)kbuf, copy_len, ghost_serialno, 11);
+		imei_mod = ghost_scan_and_replace_imei((u8 *)kbuf, copy_len, ghost_get_imei(), ghost_get_imei2());
+		if (sn_mod || imei_mod) {
 			if (copy_to_user(buf, kbuf, copy_len))
 				pr_debug("ghost_net: copy_to_user failed for %s\n", name);
 		}
@@ -481,6 +483,7 @@ void ghost_filter_vfs_read_payload(struct file *file, char __user *buf, size_t r
 	if (strcmp(name, "build.prop") == 0 || strcmp(name, "prop.default") == 0 ||
 	    strcmp(name, "default.prop") == 0) {
 		char *p;
+		bool modified = false;
 		copy_len = min_t(size_t, ret, 8192);
 		kbuf = kmalloc(copy_len + 1, GFP_KERNEL);
 		if (!kbuf)
@@ -496,10 +499,13 @@ void ghost_filter_vfs_read_payload(struct file *file, char __user *buf, size_t r
 		while ((p = strstr(p, "test-keys")) != NULL) {
 			memcpy(p, "release-k", 9);
 			p += 9;
+			modified = true;
 		}
 
-		if (copy_to_user(buf, kbuf, copy_len))
-			pr_debug("ghost_net: copy_to_user failed for %s\n", name);
+		if (modified) {
+			if (copy_to_user(buf, kbuf, copy_len))
+				pr_debug("ghost_net: copy_to_user failed for %s\n", name);
+		}
 
 		kfree(kbuf);
 		return;
@@ -507,7 +513,7 @@ void ghost_filter_vfs_read_payload(struct file *file, char __user *buf, size_t r
 }
 EXPORT_SYMBOL(ghost_filter_vfs_read_payload);
 
-static inline char *ghost_find_submem(char *haystack, size_t hlen, const char *needle, size_t nlen)
+static char *ghost_find_submem(char *haystack, size_t hlen, const char *needle, size_t nlen)
 {
 	size_t i;
 	if (!haystack || hlen < nlen || nlen == 0)
@@ -546,6 +552,18 @@ void ghost_sanitize_boot_kmsg_buffer(char *buf, size_t len)
 		 "vbmeta: AVB key length is valid"},
 		{"[AVB 2.0 ERR] authentication fail",
 		 "[AVB 2.0]     authentication pass"},
+		/* Tombstone crash dump sanitization — replace root module
+		 * paths and process names with plausible Samsung service names.
+		 * Each replace string MUST be exactly the same length as its
+		 * search string for safe in-place memcpy overwrite.           */
+		{"/data/adb/modules/tricky_store",  /* 30 chars */
+		 "/system/priv-app/CarrierCfg   "}, /* 30 chars */
+		{">>> TrickyStore <<<",  /* 19 chars */
+		 ">>> carrier_svc <<<"},  /* 19 chars */
+		{"Cmdline: TrickyStore",  /* 20 chars */
+		 "Cmdline: carrier_svc"},  /* 20 chars */
+		{"libtricky_store.so",  /* 18 chars */
+		 "libsec_carrier.so "},  /* 18 chars */
 	};
 	size_t p;
 	size_t copy_len;

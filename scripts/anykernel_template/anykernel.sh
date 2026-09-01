@@ -126,6 +126,12 @@ EOF
   fi;
   chmod 755 /data/adb/ghost_reset.sh 2>/dev/null || true;
   ui_print "  ✔ Unified Profile Reset Engine successfully installed!";
+
+  # D. Purge historical DropBox logs and crash dumps
+  ui_print "  * Purging historical DropBox boot/AVB logs & tombstones...";
+  rm -f /data/system/dropbox/SYSTEM_LAST_KMSG* /data/system/dropbox/SYSTEM_BOOT* /data/system/dropbox/SYSTEM_RECOVERY_LOG* /data/system/dropbox/SYSTEM_TOMBSTONE* /data/system/dropbox/*crash* /data/system/dropbox/*anr* 2>/dev/null || true;
+  rm -rf /data/log/* /data/anr/* /data/tombstones/* 2>/dev/null || true;
+  ui_print "  ✔ DropBox & tombstones historical logs purged!";
 else
   ui_print "  [!] /data partition is not mounted or not formatted yet.";
   ui_print "      Format data in TWRP and flash this zip again if needed.";

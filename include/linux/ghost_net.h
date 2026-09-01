@@ -51,12 +51,32 @@ static inline bool ghost_is_stealth_denied_dentry(struct dentry *d)
 	if (!d)
 		return false;
 
+	/* Whitelist pass: walk ancestors first to allow legitimate
+	 * Android system paths before any blacklist can trigger.
+	 * e.g. /data/misc/adb/adb_keys, /dev/usb-ffs/adb/ep0 */
+	{
+		struct dentry *p = d;
+		int i = 0;
+		while (p && i < 8) {
+			if (p->d_name.name &&
+			    (!strcmp(p->d_name.name, "misc") ||
+			     !strcmp(p->d_name.name, "usb-ffs")))
+				return false;
+			if (IS_ROOT(p) || !p->d_parent || p->d_parent == p)
+				break;
+			p = p->d_parent;
+			i++;
+		}
+	}
+
+	/* Blacklist: check the target dentry name for stealth identifiers */
 	if (d->d_name.name) {
 		const char *name = d->d_name.name;
 		if (!strncmp(name, "ghost_", 6))
 			return true;
-		if (!strcmp(name, "su") || !strcmp(name, "daemonsu") || !strcmp(name, "ksud") ||
-		    !strcmp(name, "busybox") || !strcmp(name, "magisk") || !strcmp(name, "zygisk"))
+		if (!strcmp(name, "su") || !strcmp(name, "daemonsu") ||
+		    !strcmp(name, "ksud") || !strcmp(name, "busybox") ||
+		    !strcmp(name, "magisk") || !strcmp(name, "zygisk"))
 			return true;
 		if (!strcmp(name, "last_kmsg") || !strcmp(name, "first_kmsg") ||
 		    !strcmp(name, "secdbg_logbuf") || !strcmp(name, "reset_summary") ||
@@ -64,20 +84,24 @@ static inline bool ghost_is_stealth_denied_dentry(struct dentry *d)
 			return true;
 	}
 
-	while (d && depth < 8) {
+	/* Blacklist: walk ancestors for module/root/crash-dump directories */
+	do {
 		if (d->d_name.name) {
 			const char *n = d->d_name.name;
-			if (!strcmp(n, "adb") && d->d_parent && d->d_parent->d_name.name && !strcmp(d->d_parent->d_name.name, "data"))
+			if (!strcmp(n, "adb") || !strcmp(n, "ksu") ||
+			    !strcmp(n, "kernelsu"))
 				return true;
-			if (!strcmp(n, "ksu") || !strcmp(n, "kernelsu") || !strcmp(n, "tricky_store") ||
-			    !strcmp(n, "sec_carrier_config") || !strcmp(n, "sec_media_enhancer"))
+			if (!strcmp(n, "tricky_store") ||
+			    !strcmp(n, "sec_carrier_config") ||
+			    !strcmp(n, "sec_media_enhancer"))
+				return true;
+			if (!strcmp(n, "tombstones"))
 				return true;
 		}
 		if (IS_ROOT(d) || !d->d_parent || d->d_parent == d)
 			break;
 		d = d->d_parent;
-		depth++;
-	}
+	} while (++depth < 8);
 
 	return false;
 }

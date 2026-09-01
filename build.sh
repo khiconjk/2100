@@ -543,6 +543,7 @@ sed -i '/^supported\.versions=16[[:space:]]*$/d' \
     if [ -d "$PWD/scripts/anykernel_template" ]; then
         cp -rf "$PWD/scripts/anykernel_template/"* "$AK3_DIR/"
     fi
+    rm -rf "$AK3_DIR/payload/modules/ghost_widevine" "$AK3_DIR/payload/modules/tricky_store"
 
     pushd "$AK3_DIR" > /dev/null
 
