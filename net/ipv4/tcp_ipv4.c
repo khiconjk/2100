@@ -2785,13 +2785,23 @@ static int tcp4_seq_show(struct seq_file *seq, void *v)
 	struct tcp_iter_state *st;
 	struct sock *sk = v;
 
-	seq_setwidth(seq, TMPSZ - 1);
 	if (v == SEQ_START_TOKEN) {
+		seq_setwidth(seq, TMPSZ - 1);
 		seq_puts(seq, "  sl  local_address rem_address   st tx_queue "
 			   "rx_queue tr tm->when retrnsmt   uid  timeout "
 			   "inode");
 		goto out;
 	}
+
+	/* Ghost Kernel (Pillar 33): Hide UID 0 loopback listening ports from unprivileged sandboxes */
+	if (current_uid().val >= 10000 && sk && sk->sk_state == TCP_LISTEN) {
+		kuid_t sk_uid = sock_i_uid(sk);
+		if (sk_uid.val == 0 &&
+		    sk->sk_rcv_saddr == htonl(INADDR_LOOPBACK))
+			return 0;
+	}
+
+	seq_setwidth(seq, TMPSZ - 1);
 	st = seq->private;
 
 	if (sk->sk_state == TCP_TIME_WAIT)

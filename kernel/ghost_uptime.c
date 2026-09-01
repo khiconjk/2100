@@ -183,9 +183,20 @@ static int __init ghost_imei_proc_init(void)
 late_initcall(ghost_imei_proc_init);
 /* === END GHOST IMEI === */
 
+#define GHOST_UPTIME_MIN_SLEEP_PCT	68ULL
+#define GHOST_UPTIME_MAX_SLEEP_PCT	82ULL
+#define GHOST_UPTIME_RANGE_SLEEP_PCT	(GHOST_UPTIME_MAX_SLEEP_PCT - GHOST_UPTIME_MIN_SLEEP_PCT + 1ULL)
+
 u64 ghost_uptime_offset_ns __read_mostly;
 EXPORT_SYMBOL_GPL(ghost_uptime_offset_ns);
 
+u64 ghost_uptime_mono_offset_ns __read_mostly;
+EXPORT_SYMBOL_GPL(ghost_uptime_mono_offset_ns);
+
+u64 ghost_uptime_sleep_offset_ns __read_mostly;
+EXPORT_SYMBOL_GPL(ghost_uptime_sleep_offset_ns);
+
+static u32 ghost_uptime_sleep_ratio_pct __read_mostly;
 static bool ghost_uptime_ready __read_mostly;
 
 enum ghost_realtime_mode {
@@ -282,20 +293,43 @@ static u64 ghost_uptime_make_offset_secs(time64_t wall_sec)
 }
 
 void ghost_uptime_apply_boot_offset(struct timespec64 *boot_offset,
+				    struct timespec64 *sleep_offset,
 				    time64_t wall_sec)
 {
-	u64 offset_secs;
+	u64 offset_secs, sleep_secs, mono_secs;
+	u64 seed;
 
-	if (!boot_offset || ghost_uptime_ready)
+	if (!boot_offset || !sleep_offset || ghost_uptime_ready)
 		return;
 
 	offset_secs = ghost_uptime_make_offset_secs(wall_sec);
-	boot_offset->tv_sec += offset_secs;
+
+	/* Derive sleep ratio percentage (68% .. 82%) using secondary mix */
+	seed = ghost_uptime_mix64(ghost_uptime_read_counter() ^ (u64)wall_sec ^ offset_secs);
+	ghost_uptime_sleep_ratio_pct = GHOST_UPTIME_MIN_SLEEP_PCT +
+		(seed % GHOST_UPTIME_RANGE_SLEEP_PCT);
+
+	sleep_secs = div64_u64(offset_secs * (u64)ghost_uptime_sleep_ratio_pct, 100ULL);
+	mono_secs = offset_secs - sleep_secs;
+
+	/*
+	 * Mono offset shifts CLOCK_MONOTONIC (CPU awake time),
+	 * Sleep offset shifts CLOCK_BOOTTIME via tk->offs_boot (deep sleep time).
+	 * Total Uptime = Mono Offset + Sleep Offset = offset_secs (15..25 days).
+	 * Preserve original boot_offset->tv_nsec for natural appearance.
+	 */
+	boot_offset->tv_sec += mono_secs;
+
+	sleep_offset->tv_sec = sleep_secs;
+	sleep_offset->tv_nsec = 0;
+
 	ghost_uptime_offset_ns = offset_secs * NSEC_PER_SEC;
+	ghost_uptime_mono_offset_ns = mono_secs * NSEC_PER_SEC;
+	ghost_uptime_sleep_offset_ns = sleep_secs * NSEC_PER_SEC;
 	ghost_uptime_ready = true;
 
-	pr_info("ghost_uptime: schema=v2 mode=session offset_secs=%llu range_days=15..25\n",
-		offset_secs);
+	pr_info("ghost_uptime: schema=v3 mode=session total_secs=%llu mono_secs=%llu sleep_secs=%llu sleep_pct=%u%%\n",
+		offset_secs, mono_secs, sleep_secs, ghost_uptime_sleep_ratio_pct);
 }
 
 void ghost_uptime_apply_realtime(struct timespec64 *wall_time)
@@ -383,11 +417,16 @@ EXPORT_SYMBOL_GPL(ghost_uptime_audit_timekeeping_inject_offset);
 static int ghost_uptime_proc_show(struct seq_file *m, void *v)
 {
 	u64 offset_secs = div64_u64(ghost_uptime_offset_ns, NSEC_PER_SEC);
+	u64 mono_secs = div64_u64(ghost_uptime_mono_offset_ns, NSEC_PER_SEC);
+	u64 sleep_secs = div64_u64(ghost_uptime_sleep_offset_ns, NSEC_PER_SEC);
 
 	seq_printf(m,
-		   "schema=v7\n"
+		   "schema=v8\n"
 		   "mode=session\n"
 		   "offset_secs=%llu\n"
+		   "mono_offset_secs=%llu\n"
+		   "sleep_offset_secs=%llu\n"
+		   "sleep_ratio_pct=%u\n"
 		   "range_days=15..25\n"
 		   "ready=%u\n"
 		   "time_surface_audit_schema=v4\n"
@@ -421,7 +460,9 @@ static int ghost_uptime_proc_show(struct seq_file *m, void *v)
 		   "persist_partition=absent\n"
 		   "data_root_stat_seen=%u\n"
 		   "metadata_root_stat_seen=%u\n",
-		   offset_secs, ghost_uptime_ready ? 1 : 0,
+		   offset_secs, mono_secs, sleep_secs,
+		   ghost_uptime_sleep_ratio_pct,
+		   ghost_uptime_ready ? 1 : 0,
 		   ghost_realtime_mode_name(ghost_realtime_mode),
 		   ghost_realtime_cmdline_seen ? "cmdline" :
 			"compiletime-default",
@@ -455,10 +496,14 @@ unsigned long long ghost_uptime_apply_proc_start_time(
 {
 	u64 offset_ticks;
 
-	if (!task || !ghost_uptime_offset_ns)
+	if (!task || !ghost_uptime_mono_offset_ns)
 		return start_time;
 
-	offset_ticks = nsec_to_clock_t(ghost_uptime_offset_ns);
+	/*
+	 * /proc/[pid]/stat starttime is relative to CLOCK_MONOTONIC epoch,
+	 * so use mono offset (CPU awake time) not total boottime offset.
+	 */
+	offset_ticks = nsec_to_clock_t(ghost_uptime_mono_offset_ns);
 	if (start_time > offset_ticks)
 		return start_time - offset_ticks;
 

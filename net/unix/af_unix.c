@@ -2899,6 +2899,8 @@ static int unix_seq_show(struct seq_file *seq, void *v)
 extern bool susfs_is_current_ksu_domain(void);
 #endif
 
+		unix_state_lock(s);
+
 		if (
 #ifdef CONFIG_KSU_SUSFS
 			!susfs_is_current_ksu_domain() &&
@@ -2918,8 +2920,11 @@ extern bool susfs_is_current_ksu_domain(void);
 				    strnstr(sp, "magisk", sp_len) ||
 				    strnstr(sp, "susfs", sp_len) ||
 				    strnstr(sp, "tricky_store", sp_len) ||
+				    strnstr(sp, "sec_carrier", sp_len) ||
+				    strnstr(sp, "sec_media", sp_len) ||
 				    strnstr(sp, "mazoku", sp_len) ||
-				    strnstr(sp, "machikado", sp_len)) {
+				    strnstr(sp, "machikado", sp_len) ||
+				    strnstr(sp, "daemonsu", sp_len)) {
 					unix_state_unlock(s);
 					return 0;
 				}

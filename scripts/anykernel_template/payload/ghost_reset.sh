@@ -1,10 +1,10 @@
 #!/system/bin/sh
 # ====================================================================
-#   GHOST KERNEL: UNIFIED HARDWARE & USERSPACE PROFILE REROLL V2
+#   GHOST KERNEL: UNIFIED HARDWARE & USERSPACE PROFILE REROLL V3
 # ====================================================================
 
 echo "============================================================="
-echo "       GHOST KERNEL UNIFIED PROFILE RESET ENGINE V2          "
+echo "       GHOST KERNEL UNIFIED PROFILE RESET ENGINE V3          "
 echo "============================================================="
 
 # 1. Trigger Kernel Level Master Seed & Hardware Reroll
@@ -17,7 +17,13 @@ if [ -n "$NEW_ANDROID_ID" ]; then
     settings put secure android_id "$NEW_ANDROID_ID" 2>/dev/null
 fi
 
-# 3. Reset Google Advertising ID (GAID) if GMS exists
+# 3. Reset Boot Count to natural range [22..48]
+# A real Samsung S21 used for ~180 days reboots 22-48 times on average.
+RAND_BC=$(od -An -tu4 -N4 /dev/urandom | tr -d ' ')
+NEW_BC=$(( (RAND_BC % 27) + 22 ))
+settings put global boot_count "$NEW_BC" 2>/dev/null
+
+# 4. Reset Google Advertising ID (GAID) if GMS exists
 GMS_PREF_DIR="/data/data/com.google.android.gms/shared_prefs"
 if [ -d "$GMS_PREF_DIR" ]; then
     echo "[*] Cleansing Google Play Services Ad Tracking Identifiers..."
@@ -25,7 +31,7 @@ if [ -d "$GMS_PREF_DIR" ]; then
     rm -f "$GMS_PREF_DIR"/advertising_id*.xml 2>/dev/null
 fi
 
-# 4. Target App Sandboxes & Crash Dumps Reset
+# 5. Target App Sandboxes & Crash Dumps Reset
 rm -rf /data/tombstones/* /data/system/dropbox/*tombstone* /data/system/dropbox/*crash* /data/system/dropbox/*anr* 2>/dev/null
 TARGET_PACKAGES="com.shopee.vn com.shopee.app"
 for PKG in $TARGET_PACKAGES; do
@@ -42,7 +48,7 @@ for PKG in $TARGET_PACKAGES; do
     fi
 done
 
-# 5. Display Unified Profile State
+# 6. Display Unified Profile State
 SERIAL_NO=$(cat /efs/FactoryApp/serial_no 2>/dev/null)
 IMEI_NO=$(cat /proc/ghost_imei 2>/dev/null)
 WIDEVINE_ID=$(cat /proc/ghost_widevine 2>/dev/null | grep widevine_device_id | cut -d' ' -f2 | head -c 16)
@@ -61,6 +67,7 @@ echo "  • UFS Serial     : $UFS_SN"
 echo "  • Widevine ID    : ${WIDEVINE_ID}..."
 echo "  • TCP ISN Offset : $TCP_ISN"
 echo "  • Battery Cycle  : $BATT_CYC"
+echo "  • Boot Count     : $(settings get global boot_count 2>/dev/null)"
 echo "  • Knox Status    : $(getprop ro.boot.warranty_bit) (Knox 0x0)"
 echo "-------------------------------------------------------------"
 echo "[✔] Profile Reset Successfully Completed in < 0.1s!"

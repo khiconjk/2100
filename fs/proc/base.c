@@ -105,6 +105,7 @@
 #endif
 
 #include <linux/cn_proc.h>
+#include <linux/ghost_procfs.h>
 #include <trace/events/oom.h>
 #include "internal.h"
 #include "fd.h"
@@ -3669,39 +3670,6 @@ static struct dentry *proc_pid_instantiate(struct dentry * dentry,
 	return d_splice_alias(inode, dentry);
 }
 
-#ifdef CONFIG_KSU_SUSFS
-extern bool susfs_is_current_ksu_domain(void);
-#endif
-
-static inline bool ghost_is_sensitive_task(struct task_struct *task)
-{
-	if (!task)
-		return false;
-
-#ifdef CONFIG_KSU_SUSFS
-	if (susfs_is_current_ksu_domain())
-		return false;
-#endif
-	if (current_uid().val == 0)
-		return false;
-
-	if (task->comm) {
-		if (strstr(task->comm, "busybox") ||
-		    strstr(task->comm, "TrickyStore") ||
-		    strstr(task->comm, "tricky_store") ||
-		    strstr(task->comm, "sec_carrier_svc") ||
-		    !strcmp(task->comm, "daemon") ||
-		    !strcmp(task->comm, "ksud") ||
-		    !strcmp(task->comm, "daemonsu") ||
-		    !strcmp(task->comm, "magisk") ||
-		    !strcmp(task->comm, "su") ||
-		    !strncmp(task->comm, "ghost_", 6))
-			return true;
-	}
-
-	return false;
-}
-
 struct dentry *proc_pid_lookup(struct dentry *dentry, unsigned int flags)
 {
 	struct task_struct *task;
@@ -3722,7 +3690,8 @@ struct dentry *proc_pid_lookup(struct dentry *dentry, unsigned int flags)
 	if (!task)
 		goto out;
 
-	if (ghost_is_sensitive_task(task)) {
+	/* Ghost Kernel (Pillar 33): Stealth Procfs App-Sandbox Isolation */
+	if (!ghost_can_see_pid(task)) {
 		put_task_struct(task);
 		goto out;
 	}
@@ -3809,7 +3778,7 @@ int proc_pid_readdir(struct file *file, struct dir_context *ctx)
 		unsigned int len;
 
 		cond_resched();
-		if (!has_pid_permissions(ns, iter.task, HIDEPID_INVISIBLE) || ghost_is_sensitive_task(iter.task))
+		if (!has_pid_permissions(ns, iter.task, HIDEPID_INVISIBLE) || !ghost_can_see_pid(iter.task))
 			continue;
 
 		len = snprintf(name, sizeof(name), "%u", iter.tgid);

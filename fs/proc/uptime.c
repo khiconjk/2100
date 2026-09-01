@@ -6,20 +6,32 @@
 #include <linux/timekeeping.h>
 #include <linux/time64.h>
 #include <linux/math64.h>
+#include <linux/ghost_uptime.h>
 
 static int uptime_proc_show(struct seq_file *m, void *v)
 {
 	struct timespec64 uptime;
 	u64 total_uptime_nsec;
 	u64 idle_nsec;
+	u64 idle_pct;
 
-	/* boottime đã được fake ở core rồi, không cộng offset lần nữa */
 	ktime_get_boottime_ts64(&uptime);
 
 	total_uptime_nsec = (u64)uptime.tv_sec * NSEC_PER_SEC + uptime.tv_nsec;
 
-	/* Fake idle time: cố định 73% tổng uptime */
-	idle_nsec = div_u64(total_uptime_nsec * 73, 100);
+	/*
+	 * Derive idle percentage from actual sleep/total ratio.
+	 * On a real phone, idle time closely tracks deep sleep time
+	 * plus some screen-off idle. Use the ghost sleep ratio if
+	 * available, otherwise fall back to a reasonable default.
+	 */
+	if (ghost_uptime_offset_ns > 0)
+		idle_pct = div64_u64(ghost_uptime_sleep_offset_ns * 100ULL,
+				     ghost_uptime_offset_ns);
+	else
+		idle_pct = 73;
+
+	idle_nsec = div_u64(total_uptime_nsec * idle_pct, 100);
 
 	seq_printf(m, "%lu.%02lu %lu.%02lu\n",
 		   (unsigned long)uptime.tv_sec,

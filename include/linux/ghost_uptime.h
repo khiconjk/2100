@@ -10,8 +10,11 @@ struct kstat;
 struct task_struct;
 
 extern u64 ghost_uptime_offset_ns;
+extern u64 ghost_uptime_mono_offset_ns;
+extern u64 ghost_uptime_sleep_offset_ns;
 
 void ghost_uptime_apply_boot_offset(struct timespec64 *boot_offset,
+				    struct timespec64 *sleep_offset,
 				    time64_t wall_sec);
 void ghost_uptime_apply_realtime(struct timespec64 *wall_time);
 void ghost_uptime_apply_realtime_for_settimeofday(struct timespec64 *wall_time);
