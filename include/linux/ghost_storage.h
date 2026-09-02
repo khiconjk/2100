@@ -42,6 +42,9 @@ void ghost_storage_get_panel_cell_id(u8 *date, u8 *coord);
 void ghost_storage_get_panel_octa_id(char *buf, size_t max_len);
 void ghost_storage_get_panel_manf_code(u8 *code);
 s16 ghost_storage_apply_sensor_jitter(s16 sample, int axis);
+void ghost_storage_get_gyro_bias(s16 *gyro_bias);
+s16 ghost_storage_get_baro_drift(void);
+void ghost_storage_get_scsi_wwid(char *buf, size_t max_len);
 
 u32 ghost_storage_get_tcp_isn_offset(void);
 u32 ghost_storage_get_tcp_ts_offset(void);

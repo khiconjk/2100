@@ -58,7 +58,7 @@ static inline bool ghost_can_see_pid(struct task_struct *target)
 {
 	kuid_t cur_uid = current_uid();
 
-	/* System UIDs (root, system, adb shell, etc.) have full visibility */
+	/* System UIDs (root, system 1000, radio, shell, etc.) have full visibility */
 	if (cur_uid.val < 10000)
 		return true;
 

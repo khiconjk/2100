@@ -111,13 +111,13 @@ prepare_ksu_metadata()
         return 1
     fi
 
-    shallow=$(git -C "$ksu_dir" rev-parse --is-shallow-repository) || return 1
+    shallow=$(git -C "$ksu_dir" rev-parse --is-shallow-repository 2>/dev/null) || shallow="false"
     if [[ "$shallow" == "true" ]]; then
         echo "Refreshing complete KernelSU Next history and tags..."
-        git -C "$ksu_dir" fetch --tags --unshallow origin || return 1
+        git -C "$ksu_dir" fetch --tags --unshallow origin 2>/dev/null || true
     else
         echo "Refreshing KernelSU Next tags..."
-        git -C "$ksu_dir" fetch --tags origin || return 1
+        git -C "$ksu_dir" fetch --tags origin 2>/dev/null || true
     fi
 
     commit=$(git -C "$ksu_dir" rev-parse HEAD) || return 1
@@ -579,8 +579,8 @@ build_odin() {
         md5sum -t "Odin-${MODEL}-ghost-all-in-one.tar" >> "Odin-${MODEL}-ghost-all-in-one.tar"
         mv -f "Odin-${MODEL}-ghost-all-in-one.tar" "Odin-${MODEL}-ghost-all-in-one.tar.md5"
         mv -f "Odin-${MODEL}-ghost-all-in-one.tar.bak" "Odin-${MODEL}-ghost-all-in-one.tar"
-        cp -f "Odin-${MODEL}-ghost-all-in-one.tar" "$PWD/../../Odin-${MODEL}-ghost-all-in-one.tar" 2>/dev/null || true
-        cp -f "Odin-${MODEL}-ghost-all-in-one.tar.md5" "$PWD/../../Odin-${MODEL}-ghost-all-in-one.tar.md5" 2>/dev/null || true
+        cp -f "Odin-${MODEL}-ghost-all-in-one.tar" "$PWD/../../../Odin-${MODEL}-ghost-all-in-one.tar" 2>/dev/null || true
+        cp -f "Odin-${MODEL}-ghost-all-in-one.tar.md5" "$PWD/../../../Odin-${MODEL}-ghost-all-in-one.tar.md5" 2>/dev/null || true
         popd > /dev/null
         echo "Odin packages created successfully!"
     fi

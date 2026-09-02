@@ -225,15 +225,25 @@ static ssize_t ufs_sysfs_read_desc_param(struct ufs_hba *hba,
 				param_offset, desc_buf, param_size);
 	pm_runtime_put_sync(hba->dev);
 
-	if (ret)
-		return -EINVAL;
-
+	/* Ghost Kernel (Pillars 24 & 46): UFS Device Descriptors & Realistic Health Wear */
 	if (desc_id == QUERY_DESC_IDN_DEVICE) {
 		if (param_offset == DEVICE_DESC_PARAM_MANF_ID && param_size == 2)
 			return sprintf(sysfs_buf, "0x%04X\n", ghost_storage_get_ufs_manfid_u16());
 		if (param_offset == DEVICE_DESC_PARAM_MANF_DATE && param_size == 2)
 			return sprintf(sysfs_buf, "0x%04X\n", ghost_storage_get_ufs_date_u16());
 	}
+
+	if (desc_id == QUERY_DESC_IDN_HEALTH) {
+		if (param_offset == HEALTH_DESC_PARAM_EOL_INFO && param_size == 1)
+			return sprintf(sysfs_buf, "0x01\n");
+		if (param_offset == HEALTH_DESC_PARAM_LIFE_TIME_EST_A && param_size == 1)
+			return sprintf(sysfs_buf, "0x01\n");
+		if (param_offset == HEALTH_DESC_PARAM_LIFE_TIME_EST_B && param_size == 1)
+			return sprintf(sysfs_buf, "0x01\n");
+	}
+
+	if (ret)
+		return -EINVAL;
 
 	switch (param_size) {
 	case 1:

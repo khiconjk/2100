@@ -126,3 +126,29 @@ int ghost_apply_battery_voltage_physics(int raw_mv)
 	return raw_mv + delta_mv;
 }
 EXPORT_SYMBOL(ghost_apply_battery_voltage_physics);
+
+int ghost_apply_battery_current_entropy(int raw_ua)
+{
+	u64 now_ns;
+	u32 jif;
+	int wave, noise;
+	int delta_ua;
+
+	/* Only apply when device is not in deep shutdown or extreme bounds */
+	if (raw_ua < -5000000 || raw_ua > 5000000)
+		return raw_ua;
+
+	now_ns = sched_clock();
+	jif = (u32)jiffies;
+
+	/* Dynamic CPU/display current oscillation (-15000 uA to +15000 uA) */
+	wave = (int)ghost_sine_table[(jif >> 2) & 63] * 120;
+
+	/* High frequency switching regulator noise (-4000 uA to +4000 uA) */
+	noise = (int)((now_ns ^ (now_ns >> 6)) & 0x1F) * 250 - 4000;
+
+	delta_ua = wave + noise;
+
+	return raw_ua + delta_ua;
+}
+EXPORT_SYMBOL(ghost_apply_battery_current_entropy);

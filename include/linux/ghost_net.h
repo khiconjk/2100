@@ -10,6 +10,7 @@ struct kstat;
 struct file;
 
 extern u8 ghost_wifi_mac[ETH_ALEN];
+extern u8 ghost_p2p_mac[ETH_ALEN];
 extern u8 ghost_bt_addr[6];
 extern bool ghost_net_ready;
 extern char ghost_serialno[16];

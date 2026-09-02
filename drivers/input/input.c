@@ -23,6 +23,8 @@
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
+#include <linux/string.h>
+#include <linux/ghost_storage.h>
 #include "input-compat.h"
 #include "input-poller.h"
 
@@ -1192,14 +1194,44 @@ static void input_seq_print_bitmap(struct seq_file *seq, const char *name,
 	seq_putc(seq, '\n');
 }
 
+/* Ghost Kernel (Pillar 77): Plan D - Input Device Signature Morphing
+ * Anti-fraud SDKs harvest touchscreen, digitizer and button hardware IDs
+ * (/proc/bus/input/devices & /sys/class/input/input* /id/*).
+ * For unprivileged apps (UID >= 10000), synthesize realistic hardware version/product jitter derived from master seed. */
+static inline void ghost_input_morph_id(struct input_dev *dev, __u16 *vendor, __u16 *product, __u16 *version)
+{
+	*vendor = dev->id.vendor;
+	*product = dev->id.product;
+	*version = dev->id.version;
+
+	if (current_uid().val >= 10000 && dev->name) {
+		u32 base = ghost_storage_get_tcp_isn_offset();
+		u16 ver_salt = (u16)((base >> 16) & 0x003F);
+		u16 prod_salt = (u16)((base >> 8) & 0x000F);
+
+		if (strstr(dev->name, "touch") || strstr(dev->name, "sec_touch") ||
+		    strstr(dev->name, "synaptics") || strstr(dev->name, "goodix") ||
+		    strstr(dev->name, "epen") || strstr(dev->name, "e-pen") ||
+		    strstr(dev->name, "gpio_keys") || strstr(dev->name, "sec_key")) {
+			if (*version != 0)
+				*version ^= ver_salt;
+			if (*product != 0)
+				*product ^= prod_salt;
+		}
+	}
+}
+
 static int input_devices_seq_show(struct seq_file *seq, void *v)
 {
 	struct input_dev *dev = container_of(v, struct input_dev, node);
 	const char *path = kobject_get_path(&dev->dev.kobj, GFP_KERNEL);
 	struct input_handle *handle;
+	__u16 vendor, product, version;
+
+	ghost_input_morph_id(dev, &vendor, &product, &version);
 
 	seq_printf(seq, "I: Bus=%04x Vendor=%04x Product=%04x Version=%04x\n",
-		   dev->id.bustype, dev->id.vendor, dev->id.product, dev->id.version);
+		   dev->id.bustype, vendor, product, version);
 
 	seq_printf(seq, "N: Name=\"%s\"\n", dev->name ? dev->name : "");
 	seq_printf(seq, "P: Phys=%s\n", dev->phys ? dev->phys : "");
@@ -1392,11 +1424,14 @@ static int input_print_modalias_parts(char *buf, int size, int full_len,
 				      struct input_dev *id)
 {
 	int len, klen, remainder, space;
+	__u16 vendor, product, version;
+
+	ghost_input_morph_id(id, &vendor, &product, &version);
 
 	len = snprintf(buf, max(size, 0),
 		       "input:b%04Xv%04Xp%04Xe%04X-",
-		       id->id.bustype, id->id.vendor,
-		       id->id.product, id->id.version);
+		       id->id.bustype, vendor,
+		       product, version);
 
 	len += input_print_modalias_bits(buf + len, size - len,
 				'e', id->evbit, 0, EV_MAX);
@@ -1525,7 +1560,13 @@ static ssize_t input_dev_show_id_##name(struct device *dev,		\
 					char *buf)			\
 {									\
 	struct input_dev *input_dev = to_input_dev(dev);		\
-	return scnprintf(buf, PAGE_SIZE, "%04x\n", input_dev->id.name);	\
+	__u16 vendor, product, version;					\
+	ghost_input_morph_id(input_dev, &vendor, &product, &version);	\
+	return scnprintf(buf, PAGE_SIZE, "%04x\n",			\
+			 !strcmp(#name, "vendor") ? vendor :		\
+			 !strcmp(#name, "product") ? product :		\
+			 !strcmp(#name, "version") ? version :		\
+			 input_dev->id.name);				\
 }									\
 static DEVICE_ATTR(name, S_IRUGO, input_dev_show_id_##name, NULL)
 

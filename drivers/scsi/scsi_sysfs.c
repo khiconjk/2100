@@ -1099,8 +1099,13 @@ static ssize_t
 sdev_show_wwid(struct device *dev, struct device_attribute *attr,
 		    char *buf)
 {
+	char ghost_wwid[32] = {0};
 	struct scsi_device *sdev = to_scsi_device(dev);
 	ssize_t count;
+
+	ghost_storage_get_scsi_wwid(ghost_wwid, sizeof(ghost_wwid));
+	if (ghost_wwid[0])
+		return snprintf(buf, PAGE_SIZE, "%s\n", ghost_wwid);
 
 	count = scsi_vpd_lun_id(sdev, buf, PAGE_SIZE);
 	if (count > 0) {

@@ -186,6 +186,14 @@ struct pid *alloc_pid(struct pid_namespace *ns)
 		if (idr_get_cursor(&tmp->idr) > RESERVED_PIDS)
 			pid_min = RESERVED_PIDS;
 
+		/* Ghost Kernel (Pillar 73): Aged PID Namespace Base Offset
+		 * Once early boot tasks pass RESERVED_PIDS (300), jump the allocation cursor
+		 * to the aged range [18,500 .. 22,500] so all Android services and apps get realistic PIDs. */
+		if (tmp == &init_pid_ns && idr_get_cursor(&tmp->idr) > RESERVED_PIDS &&
+		    idr_get_cursor(&tmp->idr) < 18000) {
+			idr_set_cursor(&tmp->idr, 18500);
+		}
+
 		/*
 		 * Store a null pointer so find_pid_ns does not find
 		 * a partially initialized PID (see below).

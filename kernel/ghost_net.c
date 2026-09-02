@@ -36,6 +36,7 @@
 #define GHOST_DEFAULT_RESET_AGE_SECS (GHOST_DEFAULT_RESET_AGE_DAYS * 86400ULL)
 
 u8 ghost_wifi_mac[ETH_ALEN] = {0};
+u8 ghost_p2p_mac[ETH_ALEN] = {0};
 u8 ghost_bt_addr[6] = {0};
 bool ghost_net_ready;
 char ghost_serialno[16] = {0};
@@ -43,6 +44,7 @@ bool ghost_serialno_ready;
 u64 ghost_reset_timestamp;
 bool ghost_reset_ready;
 EXPORT_SYMBOL(ghost_wifi_mac);
+EXPORT_SYMBOL(ghost_p2p_mac);
 EXPORT_SYMBOL(ghost_bt_addr);
 EXPORT_SYMBOL(ghost_net_ready);
 EXPORT_SYMBOL(ghost_serialno);
@@ -86,20 +88,24 @@ static void ghost_generate_bdaddr(u8 *bdaddr)
 
 void ghost_reroll_network_macs(void)
 {
-	u8 tmp_mac[ETH_ALEN], tmp_bt[6];
+	u8 tmp_mac[ETH_ALEN], tmp_p2p[ETH_ALEN], tmp_bt[6];
 	unsigned long flags;
 
 	ghost_generate_ieee802_mac(tmp_mac);
+	memcpy(tmp_p2p, tmp_mac, ETH_ALEN);
+	/* Distinct P2P Wi-Fi Direct address: Locally Administered, Unicast */
+	tmp_p2p[0] = (tmp_p2p[0] & 0xFE) | 0x02;
 	ghost_generate_bdaddr(tmp_bt);
 
 	spin_lock_irqsave(&ghost_mac_lock, flags);
 	memcpy(ghost_wifi_mac, tmp_mac, ETH_ALEN);
+	memcpy(ghost_p2p_mac, tmp_p2p, ETH_ALEN);
 	memcpy(ghost_bt_addr, tmp_bt, 6);
 	ghost_net_ready = true;
 	spin_unlock_irqrestore(&ghost_mac_lock, flags);
 
-	pr_debug("ghost_net: rerolled WiFi MAC %pM, BT BD_ADDR %02X:%02X:%02X:%02X:%02X:%02X\n",
-		ghost_wifi_mac,
+	pr_debug("ghost_net: rerolled WiFi MAC %pM, P2P MAC %pM, BT BD_ADDR %02X:%02X:%02X:%02X:%02X:%02X\n",
+		ghost_wifi_mac, ghost_p2p_mac,
 		ghost_bt_addr[5], ghost_bt_addr[4], ghost_bt_addr[3],
 		ghost_bt_addr[2], ghost_bt_addr[1], ghost_bt_addr[0]);
 }
@@ -107,7 +113,7 @@ EXPORT_SYMBOL(ghost_reroll_network_macs);
 
 void ghost_net_init_macs(void)
 {
-	u8 tmp_mac[ETH_ALEN], tmp_bt[6];
+	u8 tmp_mac[ETH_ALEN], tmp_p2p[ETH_ALEN], tmp_bt[6];
 	unsigned long flags;
 
 	/* Fast path: check without lock first (read is safe; worst case double-init) */
@@ -115,18 +121,22 @@ void ghost_net_init_macs(void)
 		return;
 
 	ghost_generate_ieee802_mac(tmp_mac);
+	memcpy(tmp_p2p, tmp_mac, ETH_ALEN);
+	/* Distinct P2P Wi-Fi Direct address: Locally Administered, Unicast */
+	tmp_p2p[0] = (tmp_p2p[0] & 0xFE) | 0x02;
 	ghost_generate_bdaddr(tmp_bt);
 
 	spin_lock_irqsave(&ghost_mac_lock, flags);
 	if (!ghost_net_ready) {
 		memcpy(ghost_wifi_mac, tmp_mac, ETH_ALEN);
+		memcpy(ghost_p2p_mac, tmp_p2p, ETH_ALEN);
 		memcpy(ghost_bt_addr, tmp_bt, 6);
 		ghost_net_ready = true;
 	}
 	spin_unlock_irqrestore(&ghost_mac_lock, flags);
 
-	pr_debug("ghost_net: initialized WiFi MAC %pM, BT BD_ADDR %02X:%02X:%02X:%02X:%02X:%02X\n",
-		ghost_wifi_mac,
+	pr_debug("ghost_net: initialized WiFi MAC %pM, P2P MAC %pM, BT BD_ADDR %02X:%02X:%02X:%02X:%02X:%02X\n",
+		ghost_wifi_mac, ghost_p2p_mac,
 		ghost_bt_addr[5], ghost_bt_addr[4], ghost_bt_addr[3],
 		ghost_bt_addr[2], ghost_bt_addr[1], ghost_bt_addr[0]);
 }
@@ -300,6 +310,31 @@ static int ghost_is_reset_target(const struct path *path)
 			    !strcmp(gp->d_name.name, "0"))
 				return 1;
 		}
+
+		/* 6d. /data/user/0/* or /data/data/* → app private sandbox packages */
+		if (d->d_parent && d->d_parent->d_name.name) {
+			if (!strcmp(d->d_parent->d_name.name, "0")) {
+				struct dentry *gp = d->d_parent->d_parent;
+				if (gp && gp->d_name.name && !strcmp(gp->d_name.name, "user"))
+					return 1;
+			}
+			if (!strcmp(d->d_parent->d_name.name, "data")) {
+				struct dentry *gp = d->d_parent->d_parent;
+				if (gp && gp->d_name.name && !strcmp(gp->d_name.name, "data"))
+					return 1;
+			}
+		}
+	}
+
+	/* 7. Ghost Kernel (Pillar 74): Plan A - System & Read-Only Partitions VFS Timestamp Normalization
+	 * App sandbox SDKs check /system/lib64/libc.so, /system/build.prop, /vendor, etc. to detect OS changes.
+	 * Cloak read-only system partition files (EXT4 / EROFS) for unprivileged applications (UID >= 10000). */
+	if (current_uid().val >= 10000 && inode && inode->i_sb) {
+		if ((inode->i_sb->s_flags & SB_RDONLY) &&
+		    (inode->i_sb->s_magic == 0xEF53 /* EXT4_SUPER_MAGIC */ ||
+		     inode->i_sb->s_magic == 0xe0f5e1e2 /* EROFS_SUPER_MAGIC_V1 */)) {
+			return 3;
+		}
 	}
 
 	return 0;
@@ -330,6 +365,14 @@ void ghost_apply_stat_reset(const struct path *path, struct kstat *stat)
 		stat->mtime.tv_sec = (time64_t)reset_ts;
 		stat->mtime.tv_nsec = nsec_m;
 		stat->result_mask |= (STATX_BTIME | STATX_CTIME | STATX_MTIME);
+
+		/* Ghost Kernel (Pillar 72): VFS Inode Number Offset (Aged App Inode Range)
+		 * Freshly created sandbox directory has suspiciously low sequential inode (< 200,000).
+		 * Cloak to aged filesystem inode range [250,000 .. 1,000,000+]. */
+		if (stat->ino > 0 && stat->ino < 200000ULL) {
+			u64 ino_offset = 250000ULL + (u64)((base ^ (u32)stat->ino) % 750000UL);
+			stat->ino += ino_offset;
+		}
 	} else if (target == 2) {
 		/* Pillar 25: Canonical stock Android system image timestamp (1230768000 = 2008-12-31 22:00:00 UTC) */
 		stat->btime.tv_sec = (time64_t)1230768000;
@@ -340,6 +383,24 @@ void ghost_apply_stat_reset(const struct path *path, struct kstat *stat)
 		stat->mtime.tv_nsec = 0;
 		stat->atime.tv_sec = (time64_t)1230768000;
 		stat->atime.tv_nsec = 0;
+		stat->result_mask |= (STATX_BTIME | STATX_CTIME | STATX_MTIME | STATX_ATIME);
+	} else if (target == 3) {
+		/* Ghost Kernel (Pillar 74): Plan A - System & Vendor File Age Spoofing
+		 * Canonical Samsung Stock BUL1 Release Timestamp: 1638778962 (Mon Dec 6 08:22:42 UTC 2021)
+		 * Deterministic subtle jitter per inode (within 15 minutes). */
+		u32 base = ghost_storage_get_tcp_isn_offset();
+		time64_t stock_base = 1638778962LL;
+		time64_t jitter = (time64_t)(((u32)stat->ino ^ base) % 900);
+		long nsec = (long)(((u32)stat->ino * 2654435761UL) % 999999999UL);
+
+		stat->btime.tv_sec = stock_base + jitter;
+		stat->btime.tv_nsec = nsec;
+		stat->ctime.tv_sec = stock_base + jitter;
+		stat->ctime.tv_nsec = nsec;
+		stat->mtime.tv_sec = stock_base + jitter;
+		stat->mtime.tv_nsec = nsec;
+		stat->atime.tv_sec = stock_base + jitter;
+		stat->atime.tv_nsec = nsec;
 		stat->result_mask |= (STATX_BTIME | STATX_CTIME | STATX_MTIME | STATX_ATIME);
 	}
 }
@@ -717,9 +778,7 @@ void ghost_net_apply_mac(struct net_device *dev)
 		pr_debug("ghost_net: applied ghost MAC %pM to interface %s\n",
 			dev->dev_addr, dev->name);
 	} else if (!strncmp(dev->name, "p2p", 3)) {
-		memcpy(dev->dev_addr, ghost_wifi_mac, ETH_ALEN);
-		/* Modify byte 0 slightly for P2P so it has unique address while retaining IEEE 802 */
-		dev->dev_addr[0] ^= 0x04;
+		memcpy(dev->dev_addr, ghost_p2p_mac, ETH_ALEN);
 		pr_debug("ghost_net: applied ghost P2P MAC %pM to interface %s\n",
 			dev->dev_addr, dev->name);
 	}
@@ -799,9 +858,7 @@ static void ghost_boot_sanitizer_fn(struct work_struct *work)
 		"NB=$(( (R % 27) + 22 ));"
 		"settings put global boot_count $NB 2>/dev/null;"
 		"fi;"
-		/* 5. developer mode shielding */
-		"settings put global development_settings_enabled 0 2>/dev/null;"
-		/* 6. boot reason & history sanitization (eradicate recovery & factory_reset) */
+		/* 5. boot reason & history sanitization (eradicate recovery & factory_reset) */
 		"setprop sys.boot.reason \"reboot\" 2>/dev/null;"
 		"setprop sys.boot.reason.last \"reboot\" 2>/dev/null;"
 		"RP=;"

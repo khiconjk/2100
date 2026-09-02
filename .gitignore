@@ -41,6 +41,9 @@ __pycache__/
 .scmversion
 "\357\201\234/"
 out/
+dmesg.txt
+logcat.txt
+test.sh
 
 # Whitelist all AnyKernel3 All-In-One payload files
 !scripts/anykernel_template/**

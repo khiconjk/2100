@@ -62,14 +62,6 @@ if [ -n "$CURRENT_BC" ] && [ "$CURRENT_BC" -le 2 ] 2>/dev/null; then
     log_info "boot_count normalized: $CURRENT_BC -> $NEW_BC"
 fi
 
-# ── 2. Developer Mode Shielding ──
-# Hide Developer Options menu from Settings and anti-fraud SDK queries.
-# This does NOT disable ADB — only hides the menu visibility flag.
-DEV_SET=$(settings get global development_settings_enabled 2>/dev/null)
-if [ "$DEV_SET" = "1" ]; then
-    settings put global development_settings_enabled 0 2>/dev/null
-    log_info "development_settings_enabled hidden: 1 -> 0"
-fi
 
 # ── 3. Boot Reason History Timestamp Sync ──
 # Android bootstat records real wall-clock timestamps that leak actual boot time.

@@ -5,6 +5,8 @@
 #include <net/wext.h>
 
 #include <linux/cred.h>
+#include <linux/ghost_uptime.h>
+#include <linux/ghost_storage.h>
 
 #define BUCKET_SPACE (32 - NETDEV_HASHBITS - 1)
 
@@ -81,17 +83,43 @@ static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
 {
 	struct rtnl_link_stats64 temp;
 	const struct rtnl_link_stats64 *stats = dev_get_stats(dev, &temp);
+	u64 rx_b = stats->rx_bytes;
+	u64 rx_p = stats->rx_packets;
+	u64 tx_b = stats->tx_bytes;
+	u64 tx_p = stats->tx_packets;
+
+	/* Ghost Kernel (PLAN E): Network Traffic Volume Padding for Untrusted Apps
+	 * Apps cross-check fake uptime with /proc/net/dev network transfer volume.
+	 * A phone with 24+ days uptime cannot have only 50 KB of network traffic. */
+	if (current_uid().val >= 10000 && dev && dev->name) {
+		if (!strcmp(dev->name, "wlan0") || !strncmp(dev->name, "rmnet", 5)) {
+			u64 uptime_sec = ghost_uptime_offset_ns ?
+				div64_u64(ghost_uptime_offset_ns, NSEC_PER_SEC) : 1800000ULL;
+			u32 seed = ghost_storage_get_tcp_isn_offset() ^ (u32)dev->ifindex;
+			bool is_wlan = !strcmp(dev->name, "wlan0");
+			u64 rate_rx = is_wlan ? 3200ULL : 950ULL;  /* bytes per sec */
+			u64 rate_tx = is_wlan ? 1850ULL : 450ULL;
+
+			u64 pad_rx = (uptime_sec * rate_rx) + (u64)(seed % 500000000UL);
+			u64 pad_tx = (uptime_sec * rate_tx) + (u64)((seed >> 4) % 300000000UL);
+
+			rx_b += pad_rx;
+			rx_p += (pad_rx / 1150ULL);
+			tx_b += pad_tx;
+			tx_p += (pad_tx / 1250ULL);
+		}
+	}
 
 	seq_printf(seq, "%6s: %7llu %7llu %4llu %4llu %4llu %5llu %10llu %9llu "
 		   "%8llu %7llu %4llu %4llu %4llu %5llu %7llu %10llu\n",
-		   dev->name, stats->rx_bytes, stats->rx_packets,
+		   dev->name, rx_b, rx_p,
 		   stats->rx_errors,
 		   stats->rx_dropped + stats->rx_missed_errors,
 		   stats->rx_fifo_errors,
 		   stats->rx_length_errors + stats->rx_over_errors +
 		    stats->rx_crc_errors + stats->rx_frame_errors,
 		   stats->rx_compressed, stats->multicast,
-		   stats->tx_bytes, stats->tx_packets,
+		   tx_b, tx_p,
 		   stats->tx_errors, stats->tx_dropped,
 		   stats->tx_fifo_errors, stats->collisions,
 		   stats->tx_carrier_errors +

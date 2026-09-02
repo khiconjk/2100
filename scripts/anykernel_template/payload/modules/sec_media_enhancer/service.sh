@@ -31,12 +31,6 @@ if [ -f /proc/ghost_mac ]; then
     fi
 fi
 
-# ── Developer Mode Shielding ──
-# Anti-fraud SDKs check Settings.Global for developer/debug flags.
-# A normal user never has Developer Options visible.
-# Setting development_settings_enabled=0 only hides the menu in
-# Settings app — it does NOT disable ADB or break any functionality.
-settings put global development_settings_enabled 0 2>/dev/null
 
 # ── Boot Count Normalization ──
 # A real Samsung S21 used for ~180 days typically reboots 22-48 times
@@ -48,19 +42,19 @@ if [ -n "$CURRENT_BC" ] && [ "$CURRENT_BC" -le 2 ] 2>/dev/null; then
     if [ -f /proc/ghost_storage ]; then
         SEED_HEX=$(grep tcp_isn_offset /proc/ghost_storage | awk '{print $2}' | sed 's/^0x//')
         if [ -n "$SEED_HEX" ]; then
-            SEED_DEC=$((16#${SEED_HEX} 2>/dev/null)) || SEED_DEC=0
+            SEED_DEC=$((16#${SEED_HEX}))
         fi
     fi
     # Fallback: use Android ID as seed source
     if [ -z "$SEED_DEC" ] || [ "$SEED_DEC" -eq 0 ] 2>/dev/null; then
         AID=$(settings get secure android_id 2>/dev/null)
         if [ -n "$AID" ]; then
-            SEED_DEC=$(printf '%d' "0x${AID%????????}" 2>/dev/null) || SEED_DEC=0
+            SEED_DEC=$((16#${AID}))
         fi
     fi
     # Final fallback: random
     if [ -z "$SEED_DEC" ] || [ "$SEED_DEC" -eq 0 ] 2>/dev/null; then
-        SEED_DEC=$(od -An -tu4 -N4 /dev/urandom | tr -d ' ')
+        SEED_DEC=$(tr -dc '0-9' < /dev/urandom | head -c 4)
     fi
     # Map to range [22..48] (27 values)
     NEW_BC=$(( (SEED_DEC % 27) + 22 ))
@@ -72,14 +66,21 @@ fi
 # persist.sys.boot.reason.history which leak the actual boot time.
 # We rewrite them to align with kernel-shifted btime from /proc/stat.
 
-RESETPROP=""
-if [ -x /data/adb/ksu/bin/resetprop ]; then
-    RESETPROP="/data/adb/ksu/bin/resetprop"
-elif [ -x /data/adb/magisk/resetprop ]; then
-    RESETPROP="/data/adb/magisk/resetprop"
+RESETPROP=$(command -v resetprop 2>/dev/null)
+if [ -z "$RESETPROP" ]; then
+    [ -x /data/adb/ksu/bin/resetprop ] && RESETPROP="/data/adb/ksu/bin/resetprop"
+    [ -x /data/adb/magisk/resetprop ] && RESETPROP="/data/adb/magisk/resetprop"
+    [ -x /data/adb/ap/bin/resetprop ] && RESETPROP="/data/adb/ap/bin/resetprop"
 fi
 
 if [ -n "$RESETPROP" ]; then
+    # Sanitize RescueParty and factory_reset logs
+    $RESETPROP --delete sys.rescue_boot_count 2>/dev/null
+    $RESETPROP --delete sys.rescue_boot_start 2>/dev/null
+    $RESETPROP --delete sys.boot.reason 2>/dev/null
+    $RESETPROP -n sys.boot.reason "reboot" 2>/dev/null
+    $RESETPROP -n ro.boot.bootreason "reboot" 2>/dev/null
+    
     BTIME=$(awk '/^btime/{print $2}' /proc/stat)
 
     if [ -n "$BTIME" ] && [ "$BTIME" -gt 1000000000 ] 2>/dev/null; then

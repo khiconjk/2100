@@ -13,5 +13,6 @@ extern const s8 ghost_sine_table[64];
 int ghost_apply_thermal_entropy(const char *zone_name, int raw_temp);
 int ghost_apply_battery_temp_entropy(int raw_temp);
 int ghost_apply_battery_voltage_physics(int raw_mv);
+int ghost_apply_battery_current_entropy(int raw_ua);
 
 #endif /* _LINUX_GHOST_THERMAL_H */

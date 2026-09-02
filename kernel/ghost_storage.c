@@ -58,6 +58,9 @@ static u8 ghost_panel_coord[4] = {0};
 static char ghost_panel_octa_id[17] = {0};
 static u8 ghost_panel_manf_code[5] = {0};
 static s16 ghost_sensor_bias[3] = {0};
+static s16 ghost_gyro_bias[3] = {0};
+static s16 ghost_baro_drift_hpa = 0;
+static char ghost_scsi_wwid[32] = {0};
 static u32 ghost_tcp_isn_offset = 0;
 static u32 ghost_tcp_ts_offset = 0;
 static int ghost_battery_cycle = 185;
@@ -158,18 +161,29 @@ static void ghost_storage_derive_ids(void)
 		ghost_panel_manf_code[3] = digest[13];
 		ghost_panel_manf_code[4] = digest[14];
 
-		/* 6. MEMS Sensor Fixed Bias Drift (derived from KDF seed) */
-		ghost_sensor_bias[0] = (s16)((digest[15] % 3) - 1);
-		ghost_sensor_bias[1] = (s16)((digest[16] % 3) - 1);
-		ghost_sensor_bias[2] = (s16)((digest[17] % 3) - 1);
+		/* 6. MEMS Sensor Fixed Bias Drift & Barometer baseline (derived from KDF seed) */
+		ghost_sensor_bias[0] = (s16)((digest[15] % 17) - 8);
+		ghost_sensor_bias[1] = (s16)((digest[16] % 17) - 8);
+		ghost_sensor_bias[2] = (s16)((digest[17] % 17) - 8);
+
+		ghost_gyro_bias[0] = (s16)((digest[23] % 11) - 5);
+		ghost_gyro_bias[1] = (s16)((digest[24] % 11) - 5);
+		ghost_gyro_bias[2] = (s16)((digest[25] % 11) - 5);
+
+		ghost_baro_drift_hpa = (s16)((digest[26] % 31) - 15); /* -1.5 .. +1.5 hPa */
+
+		/* 6b. SCSI WWID in IEEE NAA format (Samsung OUI 0x0001ce) */
+		snprintf(ghost_scsi_wwid, sizeof(ghost_scsi_wwid),
+			 "naa.5001ce%02x%02x%02x%02x%02x",
+			 digest[0], digest[1], digest[2], digest[3], digest[4]);
 
 		/* 7. TCP/IP Stack ISN and Timestamp Offsets */
 		ghost_tcp_isn_offset = get_unaligned_le32(&digest[18]);
 		ghost_tcp_ts_offset = get_unaligned_le32(&digest[22]);
 
 		/* 8. Battery Health, Cycle Count & ASoC */
-		ghost_battery_cycle = 250 + (digest[19] % 350);
-		ghost_battery_asoc = 92 + (digest[20] % 7);
+		ghost_battery_cycle = 180 + (((u16)digest[19] << 8 | digest[20]) % 371);  /* 180..550 cycles */
+		ghost_battery_asoc = 92 + (digest[27] % 7);  /* 92..98% */
 
 		/* 9. Widevine DRM Device Unique ID (32 bytes / 256-bit) */
 		{
@@ -496,6 +510,31 @@ s16 ghost_storage_apply_sensor_jitter(s16 sample, int axis)
 }
 EXPORT_SYMBOL(ghost_storage_apply_sensor_jitter);
 
+void ghost_storage_get_gyro_bias(s16 *gyro_bias)
+{
+	ghost_ensure_ready();
+	if (gyro_bias)
+		memcpy(gyro_bias, ghost_gyro_bias, sizeof(ghost_gyro_bias));
+}
+EXPORT_SYMBOL(ghost_storage_get_gyro_bias);
+
+s16 ghost_storage_get_baro_drift(void)
+{
+	ghost_ensure_ready();
+	return ghost_baro_drift_hpa;
+}
+EXPORT_SYMBOL(ghost_storage_get_baro_drift);
+
+void ghost_storage_get_scsi_wwid(char *buf, size_t max_len)
+{
+	ghost_ensure_ready();
+	if (buf && max_len > 0) {
+		strncpy(buf, ghost_scsi_wwid, max_len - 1);
+		buf[max_len - 1] = '\0';
+	}
+}
+EXPORT_SYMBOL(ghost_storage_get_scsi_wwid);
+
 u32 ghost_storage_get_tcp_isn_offset(void)
 {
 	ghost_ensure_ready();
@@ -572,15 +611,31 @@ void ghost_storage_apply_statfs_geometry(const struct path *path, struct kstatfs
 	orig_avail = buf->f_bavail;
 
 	if (orig_blocks > 0) {
-		/* Scale free and available blocks proportionally to preserve usage percentage */
+		u64 simulated_free, simulated_avail;
+		u32 fake_used_pct;
+
+		/* Ghost Kernel (Pillar 47): Realistic Storage Usage Jitter (64% - 82% used)
+		 * Fresh device/wipe typically has > 90% free space which is a fraud red-flag. */
+		fake_used_pct = 64 + (((u32)ghost_storage_master_seed[16] << 4 | (ghost_storage_master_seed[17] & 0x0F)) % 19);
+		simulated_free = (stock_total_blocks * (100 - fake_used_pct)) / 100;
+		simulated_avail = (simulated_free > (stock_total_blocks / 20)) ?
+				  simulated_free - (stock_total_blocks / 20) : simulated_free;
+
 		buf->f_blocks = stock_total_blocks;
-		buf->f_bfree = (orig_free * stock_total_blocks) / orig_blocks;
-		buf->f_bavail = (orig_avail * stock_total_blocks) / orig_blocks;
+
+		/* If actual free space is suspiciously high (> 80% free), simulate aged device usage */
+		if ((orig_free * 100 / orig_blocks) > 80) {
+			buf->f_bfree = simulated_free;
+			buf->f_bavail = simulated_avail;
+		} else {
+			buf->f_bfree = (orig_free * stock_total_blocks) / orig_blocks;
+			buf->f_bavail = (orig_avail * stock_total_blocks) / orig_blocks;
+		}
 
 		/* Standardize inode geometry (1 inode per 4 blocks) */
 		buf->f_files = stock_total_blocks / 4;
 		if (buf->f_ffree > 0) {
-			buf->f_ffree = (buf->f_files * orig_avail) / orig_blocks;
+			buf->f_ffree = (buf->f_files * buf->f_bavail) / stock_total_blocks;
 		}
 	}
 }
@@ -700,8 +755,13 @@ static int ghost_storage_proc_show(struct seq_file *m, void *v)
 		   ghost_panel_date[6], ghost_panel_coord[0], ghost_panel_coord[1],
 		   ghost_panel_coord[2], ghost_panel_coord[3]);
 	seq_printf(m, "panel_octa_id: %s\n", ghost_panel_octa_id);
+	seq_printf(m, "scsi_wwid: %s\n", ghost_scsi_wwid);
 	seq_printf(m, "sensor_bias: X=%d Y=%d Z=%d\n",
 		   ghost_sensor_bias[0], ghost_sensor_bias[1], ghost_sensor_bias[2]);
+	seq_printf(m, "gyro_bias: X=%d Y=%d Z=%d\n",
+		   ghost_gyro_bias[0], ghost_gyro_bias[1], ghost_gyro_bias[2]);
+	seq_printf(m, "baro_drift_hpa: %d.%d\n",
+		   ghost_baro_drift_hpa / 10, abs(ghost_baro_drift_hpa % 10));
 	seq_printf(m, "tcp_isn_offset: 0x%08X\n", ghost_tcp_isn_offset);
 	seq_printf(m, "tcp_ts_offset: 0x%08X\n", ghost_tcp_ts_offset);
 	seq_printf(m, "battery_cycle: %d\n", ghost_battery_cycle);

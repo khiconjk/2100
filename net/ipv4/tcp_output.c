@@ -246,6 +246,9 @@ void tcp_select_initial_window(const struct sock *sk, int __space, __u32 mss,
 	else
 		(*rcv_wnd) = min_t(u32, space, U16_MAX);
 
+	/* Ghost Kernel (Pillar 54): Normalize initial SYN window to 65535 (Samsung OneUI stock p0f signature) */
+	(*rcv_wnd) = 65535;
+
 	if (init_rcv_wnd)
 		*rcv_wnd = min(*rcv_wnd, init_rcv_wnd * mss);
 
@@ -257,8 +260,8 @@ void tcp_select_initial_window(const struct sock *sk, int __space, __u32 mss,
 		space = min_t(u32, space, *window_clamp);
 		*rcv_wscale = clamp_t(int, ilog2(space) - 15,
 				      0, TCP_MAX_WSCALE);
-		/* Ghost Kernel (Pillar 26): Cloak to standard Samsung Stock TCP WScale (7) */
-		if (*rcv_wscale > 0 && *rcv_wscale < 7)
+		/* Ghost Kernel (Pillar 26 & 54): Cloak to standard Samsung Stock TCP WScale (7) */
+		if (*rcv_wscale > 0)
 			*rcv_wscale = 7;
 	}
 	/* Set the clamp no higher than max representable value */

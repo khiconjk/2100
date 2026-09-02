@@ -343,6 +343,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			value.intval = SEC_BATTERY_CURRENT_UA;
 			psy_do_property(battery->pdata->fuelgauge_name, get,
 				POWER_SUPPLY_PROP_CURRENT_NOW, value);
+			value.intval = ghost_apply_battery_current_entropy(value.intval);
 #if defined(CONFIG_SEC_FACTORY)
 			pr_err("%s: batt_current_ua_now (%d)\n",
 					__func__, value.intval);
