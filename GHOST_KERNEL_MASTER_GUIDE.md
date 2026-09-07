@@ -1,6 +1,6 @@
 # HƯỚNG DẪN KỸ THUẬT TOÀN DIỆN: HỆ THỐNG GHOST KERNEL SAMSUNG GALAXY S21
-> **Thiết bị mục tiêu**: Samsung Galaxy S21 5G (`SM-G991B` / Tên mã: `o1s` / Chipset: Samsung Exynos 2100)  
-> **Phiên bản Kernel**: Linux 5.4.129 (`5.4.129-22936777-abG991BXXS3BUL1`)  
+> **Thiết bị mục tiêu**: Samsung Galaxy S21 5G (`SM-G991B` / Tên mã: `o1s` / Chipset: Samsung Exynos 2100)
+> **Phiên bản Kernel**: Linux 5.4.129 (`5.4.129-22936777-abG991BXXS3BUL1`)
 > **Mục tiêu tối thượng**: Đạt mức độ tàng hình và che phủ danh tính phần cứng tối đa (Hardware Anti-Fingerprinting / Anti-Fraud SDK Evasion) nhưng vẫn đảm bảo **100% phần cứng hoạt động mượt mà, ổn định tuyệt đối, không crash, không panic**.
 
 ---
@@ -154,7 +154,7 @@ static ssize_t lot_id2_show(struct device *dev, struct device_attribute *attr, c
 ## 4. LỚP 3: CỤM 4 CAMERA VẬT LÝ (MODULE SERIAL & SENSOR WAFER OTP)
 
 ### A. Cơ Chế Hoạt Động & Bí Quyết Tránh Treo Camera
-Đây là một trong những lớp tinh vi và dễ gây lỗi nhất trên dòng Samsung Galaxy S21.  
+Đây là một trong những lớp tinh vi và dễ gây lỗi nhất trên dòng Samsung Galaxy S21.
 Samsung Galaxy S21 sở hữu cụm 4 camera:
 1. `CAM_INFO_REAR` (Camera chính 1x - 12MP Wide IMX555)
 2. `CAM_INFO_REAR2` (Camera tele 3x - 64MP GW2)

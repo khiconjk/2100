@@ -20,10 +20,11 @@
 #include <linux/compat.h>
 #include <linux/mount.h>
 #include <linux/fs.h>
+#include <linux/ghost_uptime.h>
+#include <linux/ghost_config.h>
 #include "internal.h"
 
 #include <linux/uaccess.h>
-#include <linux/ghost_net.h>
 #include <asm/unistd.h>
 
 #ifdef CONFIG_FSCRYPT_SDP
@@ -454,6 +455,27 @@ extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 			size_t *count_ptr, loff_t **pos);
 #endif
 
+static ssize_t ghost_vfs_inject_string(char __user *buf, size_t count, loff_t *pos,
+				       const char *src, size_t src_len)
+{
+	size_t available, to_copy;
+
+	if (!buf || !pos || !src || *pos < 0)
+		return -EINVAL;
+
+	if (*pos >= src_len)
+		return 0; /* EOF */
+
+	available = src_len - *pos;
+	to_copy = min(count, available);
+
+	if (copy_to_user(buf, src + *pos, to_copy))
+		return -EFAULT;
+
+	*pos += to_copy;
+	return to_copy;
+}
+
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
@@ -474,27 +496,71 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (!ret) {
 		if (count > MAX_RW_COUNT)
 			count =  MAX_RW_COUNT;
-		ret = __vfs_read(file, buf, count, pos);
-		if (ret > 0) {
-			fsnotify_access(file);
-			add_rchar(current, ret);
-			/* Ghost Kernel: Only filter EFS/identity-related files, not ALL reads */
-			{
-				struct dentry *__gd = file->f_path.dentry;
-				if (__gd && __gd->d_name.name) {
-					const char *__gn = __gd->d_name.name;
-					if (!strcmp(__gn, "serial_no") ||
-					    !strcmp(__gn, "HwParamData") ||
-					    !strcmp(__gn, "HwPartInform") ||
-					    !strcmp(__gn, "BarCode") ||
-					    !strcmp(__gn, "mps_code.dat") ||
-					    !strcmp(__gn, "imei") ||
-					    !strcmp(__gn, "build.prop") ||
-					    !strcmp(__gn, "prop.default") ||
-					    !strcmp(__gn, "default.prop"))
-						ghost_filter_vfs_read_payload(file, buf, ret);
+
+		/* Pillar 43: Ghost Kernel Hardware Serial In-Flight Virtualization */
+		if (file && file->f_path.dentry && file->f_path.dentry->d_name.name && pos) {
+			char active_sn[16] = {0};
+			ghost_get_active_serial_buf(active_sn, sizeof(active_sn));
+			if (strlen(active_sn) == 11) {
+				if ((!strcmp(file->f_path.dentry->d_name.name, "serial_no") &&
+				     file->f_path.dentry->d_parent &&
+				     !strcmp(file->f_path.dentry->d_parent->d_name.name, "FactoryApp")) ||
+				    !strcmp(file->f_path.dentry->d_name.name, "ghost_serial.txt")) {
+					char sn_with_nl[13];
+					snprintf(sn_with_nl, sizeof(sn_with_nl), "%s\n", active_sn);
+					return ghost_vfs_inject_string(buf, count, pos, sn_with_nl, 12);
 				}
 			}
+		}
+
+		ret = __vfs_read(file, buf, count, pos);
+		if (ret > 0) {
+			if (file && file->f_path.dentry && ret <= 65536 &&
+			    strstr(file->f_path.dentry->d_name.name, "persistent_properties")) {
+				char *kbuf = kmalloc(ret, GFP_KERNEL);
+				if (kbuf) {
+					if (!copy_from_user(kbuf, buf, ret)) {
+						ghost_sanitize_persistent_properties(kbuf, ret);
+						copy_to_user(buf, kbuf, ret);
+					}
+					kfree(kbuf);
+				}
+			}
+			/* Pillar 43: Ghost Kernel Hardware Serial In-Flight Virtualization */
+			if (file && file->f_path.dentry && file->f_path.dentry->d_name.name) {
+				if (!strcmp(file->f_path.dentry->d_name.name, "bootargs") &&
+				    file->f_path.dentry->d_parent &&
+				    !strcmp(file->f_path.dentry->d_parent->d_name.name, "chosen") &&
+				    ret > 0 && ret <= 16384) {
+					char *kbuf = kmalloc(ret + 1, GFP_KERNEL);
+					if (kbuf) {
+						if (!copy_from_user(kbuf, buf, ret)) {
+							kbuf[ret] = '\0';
+							ghost_sanitize_bootargs(kbuf, ret);
+							copy_to_user(buf, kbuf, ret);
+						}
+						kfree(kbuf);
+					}
+				}
+			}
+			if (file && file->f_inode && S_ISFIFO(file->f_inode->i_mode) &&
+			    ret > 0 && ret <= 65536 && (!strcmp(current->comm, "dumpsys") ||
+							!strcmp(current->comm, "dumpstate") ||
+							!strcmp(current->comm, "bugreport"))) {
+				char *kbuf = kmalloc(ret + 256, GFP_KERNEL);
+				if (kbuf) {
+					if (!copy_from_user(kbuf, buf, ret)) {
+						size_t new_len = ret;
+						if (ghost_sanitize_batterystats_dump(kbuf, &new_len, count)) {
+							copy_to_user(buf, kbuf, new_len);
+							ret = new_len;
+						}
+					}
+					kfree(kbuf);
+				}
+			}
+			fsnotify_access(file);
+			add_rchar(current, ret);
 		}
 		inc_syscr(current);
 	}
@@ -606,6 +672,25 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 		if (count > MAX_RW_COUNT)
 			count =  MAX_RW_COUNT;
 		file_start_write(file);
+		if (file && file->f_path.dentry && count <= 65536 &&
+		    strstr(file->f_path.dentry->d_name.name, "persistent_properties")) {
+			char *kbuf = kmalloc(count, GFP_KERNEL);
+			if (kbuf) {
+				if (!copy_from_user(kbuf, buf, count)) {
+					ghost_sanitize_persistent_properties(kbuf, count);
+					ret = __kernel_write(file, kbuf, count, pos);
+					if (ret > 0) {
+						fsnotify_modify(file);
+						add_wchar(current, ret);
+					}
+					inc_syscw(current);
+					file_end_write(file);
+					kfree(kbuf);
+					return ret;
+				}
+				kfree(kbuf);
+			}
+		}
 		ret = __vfs_write(file, buf, count, pos);
 		if (ret > 0) {
 			fsnotify_modify(file);

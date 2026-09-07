@@ -648,8 +648,10 @@ static DEFINE_SEQLOCK(susfs_uname_seqlock);
 static void susfs_my_uname_init(void)
 {
 	memset(&my_uname, 0, sizeof(my_uname));
+	strscpy(my_uname.release, "5.4.129-22936777-abG991BXXS3BULC", sizeof(my_uname.release));
+	strscpy(my_uname.version, "#1 SMP PREEMPT Tue Dec 21 19:10:34 KST 2021", sizeof(my_uname.version));
 	susfs_uname_owner = false;
-	is_susfs_uname_set = false;
+	is_susfs_uname_set = true;
 }
 
 bool susfs_uname_is_active(void)

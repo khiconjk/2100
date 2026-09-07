@@ -2574,12 +2574,16 @@ int is_video_qbuf(struct is_video_ctx *vctx,
 				planes[plane].length = (unsigned int)dbuf->size;
 
 			if (planes[plane].length < vb->planes[plane].min_length) {
-				mverr("invalid dmabuf length %u for plane %d, "
-					"minimum length %u\n",
-					vctx, video, planes[plane].length, plane,
-					vb->planes[plane].min_length);
-				dma_buf_put(dbuf);
-				goto p_err;
+				if (planes[plane].length > 0) {
+					vb->planes[plane].min_length = planes[plane].length;
+				} else {
+					mverr("invalid dmabuf length %u for plane %d, "
+						"minimum length %u\n",
+						vctx, video, planes[plane].length, plane,
+						vb->planes[plane].min_length);
+					dma_buf_put(dbuf);
+					goto p_err;
+				}
 			}
 
 			dma_buf_put(dbuf);
@@ -3090,6 +3094,9 @@ int is_video_buffer_done(struct is_video_ctx *vctx,
 		ret = -EINVAL;
 		goto p_err;
 	}
+
+	if (!vb->timestamp)
+		vb->timestamp = ktime_get_ns();
 
 	queue->buf_com++;
 

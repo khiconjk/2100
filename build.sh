@@ -27,10 +27,6 @@ KSU_OPTION=""
 SUSFS_OPTION=""
 RECOVERY_OPTION=""
 GHOST_REALTIME_MODE=${GHOST_REALTIME_MODE:-off}
-# The c49a legacy-kernel compatibility commit increments the git-derived
-# KernelSU kernel code beyond the released userspace. Keep the effective
-# kernel code aligned with the installed v3.2.0 userspace release.
-KSU_VERSION_OVERRIDE=${KSU_VERSION_OVERRIDE:-33129}
 
 case "$GHOST_REALTIME_MODE" in
 	off)
@@ -51,7 +47,7 @@ case "$GHOST_REALTIME_MODE" in
         ;;
 esac
 
-GHOST_KERNEL_CMDLINE="androidboot.selinux=permissive loop.max_part=7 $GHOST_REALTIME_CMDLINE_MODE"
+GHOST_KERNEL_CMDLINE="androidboot.selinux=permissive loop.max_part=7 androidboot.vbmeta.device_state=locked androidboot.vbmeta.size=4096 androidboot.vbmeta.digest=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.boot_hash=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.bootkey=78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95 androidboot.verifiedbootkey=78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95 androidboot.vbmeta.public_key_digest=78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95 androidboot.vbmeta.avb_version=1.2 androidboot.vbmeta.hash_alg=sha256 $GHOST_REALTIME_CMDLINE_MODE"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -82,42 +78,36 @@ done
 
 fetch_ksu()
 {
-    if [ -d "$PWD/KernelSU-Next/.git" ]; then
-        echo "KernelSU Next repository already present."
-        return 0
-    fi
     rm -rf "$PWD/KernelSU-Next"
 
     echo "Fetching KernelSU Next"
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         git submodule update --init KernelSU-Next || {
             echo "Submodule failed, cloning KernelSU-Next manually..."
-            git clone https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || abort
-            git -C KernelSU-Next checkout c49a6316c556f84b8e21ef3af3e1b49032b47ea0 || abort
+            git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || abort
         }
     else
-        git clone https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || abort
-        git -C KernelSU-Next checkout c49a6316c556f84b8e21ef3af3e1b49032b47ea0 || abort
+        git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || abort
     fi
 }
 
 prepare_ksu_metadata()
 {
     local ksu_dir="$PWD/KernelSU-Next"
-    local shallow commit tag revision_count computed_version_code version_code
+    local shallow commit tag revision_count version_code
 
     if ! git -C "$ksu_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         echo "KernelSU Next metadata error: source is not a Git worktree."
         return 1
     fi
 
-    shallow=$(git -C "$ksu_dir" rev-parse --is-shallow-repository 2>/dev/null) || shallow="false"
+    shallow=$(git -C "$ksu_dir" rev-parse --is-shallow-repository) || return 1
     if [[ "$shallow" == "true" ]]; then
         echo "Refreshing complete KernelSU Next history and tags..."
-        git -C "$ksu_dir" fetch --tags --unshallow origin 2>/dev/null || true
+        git -C "$ksu_dir" fetch --tags --unshallow origin || return 1
     else
         echo "Refreshing KernelSU Next tags..."
-        git -C "$ksu_dir" fetch --tags origin 2>/dev/null || true
+        git -C "$ksu_dir" fetch --tags origin || return 1
     fi
 
     commit=$(git -C "$ksu_dir" rev-parse HEAD) || return 1
@@ -128,12 +118,7 @@ prepare_ksu_metadata()
         return 1
     fi
 
-    computed_version_code=$((30000 + revision_count + 150))
-    version_code=${KSU_VERSION_OVERRIDE:-$computed_version_code}
-    if [[ ! "$version_code" =~ ^[1-9][0-9]*$ ]]; then
-        echo "KernelSU Next metadata error: effective version code is invalid." >&2
-        return 1
-    fi
+    version_code=$((30000 + revision_count + 150))
     if [[ -n "${KSU_EXPECTED_SOURCE_COMMIT:-}" &&
           "$commit" != "$KSU_EXPECTED_SOURCE_COMMIT" ]]; then
         echo "KernelSU Next metadata error: source commit mismatch."
@@ -152,30 +137,13 @@ prepare_ksu_metadata()
 
     printf 'KSU_SOURCE_COMMIT=%s\n' "$commit"
     printf 'KSU_VERSION_TAG=%s\n' "$tag"
-    printf 'KSU_COMPUTED_VERSION_CODE=%s\n' "$computed_version_code"
-    printf 'KSU_VERSION_OVERRIDE=%s\n' "${KSU_VERSION_OVERRIDE:-none}"
     printf 'KSU_VERSION_CODE=%s\n' "$version_code"
 }
 
 enable_susfs()
 {
-    if patch -d "$PWD/KernelSU-Next" -p1 -R --dry-run < "$PWD/patches/enable-susfs.patch" >/dev/null 2>&1; then
-        echo "SuSFS patch already applied to KernelSU Next."
-        return 0
-    fi
     echo "Applying SuSFS patch to KernelSU Next..."
     patch -d "$PWD/KernelSU-Next" -p1 < "$PWD/patches/enable-susfs.patch" || abort
-}
-
-apply_ksu_version_override()
-{
-    if patch -d "$PWD/KernelSU-Next" -p1 -R --dry-run < "$PWD/patches/ksu-version-override.patch" >/dev/null 2>&1; then
-        echo "KernelSU version override already applied."
-        return 0
-    fi
-    echo "Applying KernelSU userspace parity version override..."
-    patch -d "$PWD/KernelSU-Next" -p1 < \
-        "$PWD/patches/ksu-version-override.patch" || abort
 }
 
 echo "Preparing the build environment..."
@@ -183,14 +151,10 @@ cd "$(dirname "$0")"
 
 CORES=$(nproc)
 
-if [ "${NO_CLEAN:-0}" != "1" ]; then
-    echo "Cleaning old output..."
-    rm -rf out
-    rm -rf "build/out/$MODEL"
-    find . -name "*.a" -delete || true
-else
-    echo "NO_CLEAN=1: preserving existing build objects in out/ for fast resume."
-fi
+echo "Cleaning old output..."
+rm -rf out
+rm -rf "build/out/$MODEL"
+find . -name "*.a" -delete || true
 
 # ================= TOOLCHAIN =================
 CLANG_DIR=$PWD/toolchain/clang-r596125
@@ -236,7 +200,6 @@ LLVM_IAS=1
 ARCH=arm64
 O=out
 KCFLAGS=$GHOST_REALTIME_CFLAG
-KSU_VERSION_OVERRIDE=$KSU_VERSION_OVERRIDE
 "
 
 # ================= BOARD =================
@@ -260,7 +223,6 @@ case "$MODEL" in
 esac
 
 # ================= FLAGS =================
-RECOVERY=""
 if [[ "$RECOVERY_OPTION" == "y" ]]; then
     RECOVERY=recovery.config
     KSU_OPTION=n
@@ -268,11 +230,11 @@ if [[ "$RECOVERY_OPTION" == "y" ]]; then
 fi
 
 if [ -z "$KSU_OPTION" ]; then
-    KSU_OPTION=y
+    KSU_OPTION=n
 fi
 
 if [ -z "$SUSFS_OPTION" ]; then
-    SUSFS_OPTION=y
+    SUSFS_OPTION=n
 fi
 
 if [[ "$KSU_OPTION" == "y" ]]; then
@@ -289,11 +251,11 @@ fi
 
 # ================= STOCK BUILD INFO =================
 touch .scmversion
-export LOCALVERSION="-22936777-abG991BXXS3BUL1"
+export LOCALVERSION="-22936777-abG991BXXS3BULC"
 export KBUILD_BUILD_USER="dpi"
 export KBUILD_BUILD_HOST="21DJ6C20"
-export KBUILD_BUILD_TIMESTAMP="Tue Nov 30 18:48:28 KST 2021"
-export KBUILD_BUILD_VERSION="2"
+export KBUILD_BUILD_TIMESTAMP="Tue Dec 21 19:10:34 KST 2021"
+export KBUILD_BUILD_VERSION="1"
 
 # Ghost uptime is maintained in committed kernel sources. Do not modify source
 # files here; CI validates the single-source implementation before building.
@@ -310,8 +272,6 @@ if [[ "$KSU_OPTION" == "y" ]]; then
     if [[ "$SUSFS_OPTION" == "y" ]]; then
         enable_susfs
     fi
-
-    apply_ksu_version_override
 
     if ! grep -Fxq "$KSU_LINE" "$KCONFIG_FILE"; then
         sed -i "\|endmenu|i $KSU_LINE" "$KCONFIG_FILE"
@@ -339,13 +299,7 @@ build_kernel()
     echo "Recovery: ${RECOVERY:-N}"
     echo "-----------------------------------------------"
 
-    if [ ! -f "out/.config" ] || [ "${FORCE_DEFCONFIG:-0}" = "1" ]; then
-        echo "Generating full defconfig..."
-        make ${MAKE_ARGS} -j$CORES exynos2100_defconfig "$MODEL.config" $RECOVERY $KSU $SUSFS || abort
-    else
-        echo "Reusing out/.config (fast olddefconfig)..."
-        make ${MAKE_ARGS} -j$CORES olddefconfig || abort
-    fi
+    make ${MAKE_ARGS} -j$CORES exynos2100_defconfig "$MODEL.config" $RECOVERY $KSU $SUSFS || abort
 
     echo "Building kernel..."
     make ${MAKE_ARGS} -j$CORES || abort
@@ -403,7 +357,7 @@ build_modules()
     echo "-----------------------------------------------"
     echo "Building modules..."
 
-    make ${MAKE_ARGS} -j$CORES INSTALL_MOD_PATH=$MODULES_FOLDER INSTALL_MOD_STRIP="--strip-debug --keep-section=.ARM.attributes" modules_install || abort
+    make ${MAKE_ARGS} INSTALL_MOD_PATH=$MODULES_FOLDER INSTALL_MOD_STRIP="--strip-debug --keep-section=.ARM.attributes" modules_install || abort
 
     FILENAMES="
     sec_debug_sched_info.ko
@@ -521,11 +475,13 @@ build_zip()
     AK3_REPO="https://github.com/xfwdrev/AnyKernel3.git"
     AK3_BRANCH="t2s"
 
-    if [ ! -d "$AK3_DIR" ]; then
+    if [ ! -d "$AK3_DIR/.git" ]; then
         git clone -b "$AK3_BRANCH" "$AK3_REPO" "$AK3_DIR" || abort
-    elif [ -d "$AK3_DIR/.git" ]; then
-        git -C "$AK3_DIR" fetch origin "$AK3_BRANCH" 2>/dev/null || true
-        git -C "$AK3_DIR" checkout "$AK3_BRANCH" 2>/dev/null || true
+    else
+        git -C "$AK3_DIR" fetch origin "$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" checkout "$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" reset --hard "origin/$AK3_BRANCH" || abort
+        git -C "$AK3_DIR" clean -fd || abort
     fi
 
 # Do not restrict installation to Android 16; the o1s image is Android 12.
@@ -540,19 +496,10 @@ sed -i '/^supported\.versions=16[[:space:]]*$/d' \
 
     [[ "$MODEL" != "t2s" ]] && sed -i "s/^device\.name1=.*/device.name1=$MODEL/" "$AK3_DIR/anykernel.sh"
 
-    if [ -d "$PWD/scripts/anykernel_template" ]; then
-        cp -rf "$PWD/scripts/anykernel_template/"* "$AK3_DIR/"
-    fi
-    rm -rf "$AK3_DIR/payload/modules/ghost_widevine" "$AK3_DIR/payload/modules/tricky_store"
-
     pushd "$AK3_DIR" > /dev/null
 
-    version=${LOCALVERSION#-}
-    if [ -z "$version" ]; then
-        version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' ../arch/arm64/configs/exynos2100_defconfig | cut -d '"' -f 2)
-        version=${version#-}
-    fi
-    [ -z "$version" ] && version="22936777-abG991BXXS3BUL1"
+    version=$(grep -o 'CONFIG_LOCALVERSION="[^"]*"' ../arch/arm64/configs/exynos2100_defconfig | cut -d '"' -f 2)
+    version=${version:1}
     DATE=$(date +"%d-%m-%Y_%H-%M-%S")
 
     if [[ "$KSU_OPTION" == "y" && "$SUSFS_OPTION" == "y" ]]; then
@@ -564,26 +511,7 @@ sed -i '/^supported\.versions=16[[:space:]]*$/d' \
     fi
 
     zip -r9 "../build/out/$MODEL/$NAME" * -x ".git*" "README.md" "*placeholder" || abort
-    cp -f "../build/out/$MODEL/$NAME" "$PWD/../AnyKernel3-o1s-ghost-all-in-one.zip" 2>/dev/null || true
     popd > /dev/null
-}
-
-build_odin() {
-    echo "-----------------------------------------------"
-    echo "Building Odin TAR & TAR.MD5 packages..."
-    local out_dir="build/out/$MODEL"
-    if [ -f "$out_dir/boot.img" ] && [ -f "$out_dir/vendor_boot.img" ] && [ -f "$out_dir/dtbo.img" ]; then
-        pushd "$out_dir" > /dev/null
-        tar -H ustar -cf "Odin-${MODEL}-ghost-all-in-one.tar" boot.img dtbo.img vendor_boot.img
-        cp -f "Odin-${MODEL}-ghost-all-in-one.tar" "Odin-${MODEL}-ghost-all-in-one.tar.bak"
-        md5sum -t "Odin-${MODEL}-ghost-all-in-one.tar" >> "Odin-${MODEL}-ghost-all-in-one.tar"
-        mv -f "Odin-${MODEL}-ghost-all-in-one.tar" "Odin-${MODEL}-ghost-all-in-one.tar.md5"
-        mv -f "Odin-${MODEL}-ghost-all-in-one.tar.bak" "Odin-${MODEL}-ghost-all-in-one.tar"
-        cp -f "Odin-${MODEL}-ghost-all-in-one.tar" "$PWD/../../../Odin-${MODEL}-ghost-all-in-one.tar" 2>/dev/null || true
-        cp -f "Odin-${MODEL}-ghost-all-in-one.tar.md5" "$PWD/../../../Odin-${MODEL}-ghost-all-in-one.tar.md5" 2>/dev/null || true
-        popd > /dev/null
-        echo "Odin packages created successfully!"
-    fi
 }
 
 build_kernel
@@ -594,7 +522,6 @@ build_modules
 if [ -z "$RECOVERY" ]; then
     build_vendor_boot
     build_zip
-    build_odin
 fi
 
 echo "-----------------------------------------------"

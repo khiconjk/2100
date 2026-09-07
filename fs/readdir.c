@@ -29,51 +29,6 @@
 extern bool susfs_is_inode_sus_path(struct inode *inode);
 #endif
 
-#ifdef CONFIG_KSU_SUSFS
-extern bool susfs_is_current_ksu_domain(void);
-#endif
-
-static inline bool ghost_is_stealth_dirent(const char *name, int namlen)
-{
-	if (!name || namlen <= 0)
-		return false;
-
-#ifdef CONFIG_KSU_SUSFS
-	if (susfs_is_current_ksu_domain())
-		return false;
-#endif
-	if (current_uid().val == 0)
-		return false;
-
-	/* Prefix match: all ghost_* entries */
-	if (namlen >= 6 && !memcmp(name, "ghost_", 6))
-		return true;
-
-	switch (namlen) {
-	case 2:
-		return !memcmp(name, "su", 2);
-	case 3:
-		return !memcmp(name, "ksu", 3);
-	case 6:
-		return !memcmp(name, "magisk", 6) || !memcmp(name, "zygisk", 6) ||
-		       !memcmp(name, "pstore", 6);
-	case 7:
-		return !memcmp(name, "busybox", 7);
-	case 8:
-		return !memcmp(name, "kernelsu", 8) || !memcmp(name, "daemonsu", 8);
-	case 9:
-		return !memcmp(name, "last_kmsg", 9);
-	case 10:
-		return !memcmp(name, "first_kmsg", 10) || !memcmp(name, "tombstones", 10);
-	case 12:
-		return !memcmp(name, "tricky_store", 12);
-	case 13:
-		return !memcmp(name, "secdbg_logbuf", 13) || !memcmp(name, "reset_summary", 13);
-	default:
-		return false;
-	}
-}
-
 /*
  * Note the "unsafe_put_user() semantics: we goto a
  * label for errors.
@@ -205,8 +160,6 @@ static int fillonedir(struct dir_context *ctx, const char *name, int namlen,
 
 	if (buf->result)
 		return -EINVAL;
-	if (ghost_is_stealth_dirent(name, namlen))
-		return 0;
 	buf->result = verify_dirent_name(name, namlen);
 	if (buf->result < 0)
 		return buf->result;
@@ -307,8 +260,6 @@ static int filldir(struct dir_context *ctx, const char *name, int namlen,
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct inode *inode;
 #endif
-	if (ghost_is_stealth_dirent(name, namlen))
-		return 0;
 	buf->error = verify_dirent_name(name, namlen);
 	if (unlikely(buf->error))
 		return buf->error;
@@ -420,8 +371,6 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct inode *inode;
 #endif
-	if (ghost_is_stealth_dirent(name, namlen))
-		return 0;
 	buf->error = verify_dirent_name(name, namlen);
 	if (unlikely(buf->error))
 		return buf->error;
@@ -548,8 +497,7 @@ static int compat_fillonedir(struct dir_context *ctx, const char *name,
 
 	if (buf->result)
 		return -EINVAL;
-	if (ghost_is_stealth_dirent(name, namlen))
-		return 0;
+
 	buf->result = verify_dirent_name(name, namlen);
 	if (buf->result < 0)
 		return buf->result;
@@ -642,8 +590,7 @@ static int compat_filldir(struct dir_context *ctx, const char *name, int namlen,
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	struct inode *inode;
 #endif
-	if (ghost_is_stealth_dirent(name, namlen))
-		return 0;
+
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
 		return -EINVAL;

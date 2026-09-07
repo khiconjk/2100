@@ -15,7 +15,6 @@
 #include <linux/net.h>
 #include <linux/siphash.h>
 #include <net/secure_seq.h>
-#include <linux/ghost_storage.h>
 
 #if IS_ENABLED(CONFIG_IPV6) || IS_ENABLED(CONFIG_INET)
 #include <linux/in6.h>
@@ -50,7 +49,7 @@ static u32 seq_scale(u32 seq)
 	 *	overlaps less than one time per MSL (2 minutes).
 	 *	Choosing a clock of 64 ns period is OK. (period of 274 s)
 	 */
-	return seq + (ktime_get_real_ns() >> 6) + ghost_storage_get_tcp_isn_offset();
+	return seq + (ktime_get_real_ns() >> 6);
 }
 #endif
 
@@ -71,7 +70,7 @@ u32 secure_tcpv6_ts_off(const struct net *net,
 
 	ts_secret_init();
 	return siphash(&combined, offsetofend(typeof(combined), daddr),
-		       &ts_secret) + ghost_storage_get_tcp_ts_offset();
+		       &ts_secret);
 }
 EXPORT_SYMBOL(secure_tcpv6_ts_off);
 
@@ -127,7 +126,7 @@ u32 secure_tcp_ts_off(const struct net *net, __be32 saddr, __be32 daddr)
 
 	ts_secret_init();
 	return siphash_2u32((__force u32)saddr, (__force u32)daddr,
-			    &ts_secret) + ghost_storage_get_tcp_ts_offset();
+			    &ts_secret);
 }
 
 /* secure_tcp_seq_and_tsoff(a, b, 0, d) == secure_ipv4_port_ephemeral(a, b, d),

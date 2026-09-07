@@ -31,7 +31,6 @@
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 #include <net/bluetooth/mgmt.h>
-#include <linux/ghost_net.h>
 
 #include "hci_request.h"
 #include "hci_debugfs.h"
@@ -756,8 +755,6 @@ static void hci_cc_read_bd_addr(struct hci_dev *hdev, struct sk_buff *skb)
 
 	if (rp->status)
 		return;
-
-	ghost_net_filter_bd_addr((u8 *)&rp->bdaddr);
 
 	if (test_bit(HCI_INIT, &hdev->flags))
 		bacpy(&hdev->bdaddr, &rp->bdaddr);

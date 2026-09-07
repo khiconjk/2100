@@ -21,11 +21,9 @@
 #include "pnode.h"
 #include "internal.h"
 
-#ifdef CONFIG_KSU_SUSFS
-extern bool susfs_is_current_ksu_domain(void);
-#endif
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 extern bool susfs_hide_sus_mnts_for_non_su_procs;
+extern bool susfs_is_current_ksu_domain(void);
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
 
@@ -105,61 +103,6 @@ static void show_type(struct seq_file *m, struct super_block *sb)
 	}
 }
 
-static inline const char *ghost_strcasestr(const char *haystack, const char *needle)
-{
-	size_t nlen, hlen;
-	if (!haystack || !needle)
-		return NULL;
-	nlen = strlen(needle);
-	hlen = strlen(haystack);
-	if (nlen > hlen)
-		return NULL;
-	while (hlen >= nlen) {
-		if (strncasecmp(haystack, needle, nlen) == 0)
-			return haystack;
-		haystack++;
-		hlen--;
-	}
-	return NULL;
-}
-
-static inline bool ghost_is_sensitive_mount(struct mount *r, struct path *path)
-{
-	const char *name;
-	if (r->mnt_devname) {
-		if (ghost_strcasestr(r->mnt_devname, "zygisk") ||
-		    ghost_strcasestr(r->mnt_devname, "ghost") ||
-		    ghost_strcasestr(r->mnt_devname, "magisk") ||
-		    ghost_strcasestr(r->mnt_devname, "kernelsu") ||
-		    ghost_strcasestr(r->mnt_devname, "susfs") ||
-		    ghost_strcasestr(r->mnt_devname, "tricky_store") ||
-		    ghost_strcasestr(r->mnt_devname, "mazoku") ||
-		    ghost_strcasestr(r->mnt_devname, "machikado"))
-			return true;
-	}
-	if (r->mnt_mountpoint && r->mnt_mountpoint->d_name.name) {
-		name = r->mnt_mountpoint->d_name.name;
-		if (ghost_strcasestr(name, "zygisk") ||
-		    ghost_strcasestr(name, "ghost") ||
-		    ghost_strcasestr(name, "magisk") ||
-		    ghost_strcasestr(name, "kernelsu") ||
-		    ghost_strcasestr(name, "susfs") ||
-		    ghost_strcasestr(name, "tricky_store"))
-			return true;
-	}
-	if (path && path->dentry && path->dentry->d_name.name) {
-		name = path->dentry->d_name.name;
-		if (ghost_strcasestr(name, "zygisk") ||
-		    ghost_strcasestr(name, "ghost") ||
-		    ghost_strcasestr(name, "magisk") ||
-		    ghost_strcasestr(name, "kernelsu") ||
-		    ghost_strcasestr(name, "susfs") ||
-		    ghost_strcasestr(name, "tricky_store"))
-			return true;
-	}
-	return false;
-}
-
 static int show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 {
 	struct proc_mounts *p = m->private;
@@ -167,14 +110,6 @@ static int show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
-
-#ifdef CONFIG_KSU_SUSFS
-	if (!susfs_is_current_ksu_domain() && current_uid().val >= 10000 && ghost_is_sensitive_mount(r, &mnt_path))
-		return 0;
-#else
-	if (current_uid().val >= 10000 && ghost_is_sensitive_mount(r, &mnt_path))
-		return 0;
-#endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	if (READ_ONCE(susfs_hide_sus_mnts_for_non_su_procs) &&
@@ -220,14 +155,6 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt->mnt_sb;
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	int err;
-
-#ifdef CONFIG_KSU_SUSFS
-	if (!susfs_is_current_ksu_domain() && current_uid().val >= 10000 && ghost_is_sensitive_mount(r, &mnt_path))
-		return 0;
-#else
-	if (current_uid().val >= 10000 && ghost_is_sensitive_mount(r, &mnt_path))
-		return 0;
-#endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	if (READ_ONCE(susfs_hide_sus_mnts_for_non_su_procs) &&
@@ -301,14 +228,6 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
-
-#ifdef CONFIG_KSU_SUSFS
-	if (!susfs_is_current_ksu_domain() && current_uid().val >= 10000 && ghost_is_sensitive_mount(r, &mnt_path))
-		return 0;
-#else
-	if (current_uid().val >= 10000 && ghost_is_sensitive_mount(r, &mnt_path))
-		return 0;
-#endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 	if (READ_ONCE(susfs_hide_sus_mnts_for_non_su_procs) &&

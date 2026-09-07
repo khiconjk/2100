@@ -3704,7 +3704,7 @@ int is_group_done(struct is_groupmgr *groupmgr,
 #endif
 
 	/* sensor tagging */
-	if (test_bit(IS_GROUP_OTF_INPUT, &group->state))
+	if (device->sensor && (test_bit(IS_GROUP_OTF_INPUT, &group->state) || frame->shot))
 		is_sensor_dm_tag(device->sensor, frame);
 
 #ifdef ENABLE_SHARED_METADATA

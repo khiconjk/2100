@@ -22,7 +22,6 @@
 #include <linux/of.h>
 #include <linux/of_net.h>
 #include <linux/cpu.h>
-#include <linux/ghost_net.h>
 
 #include "net-sysfs.h"
 
@@ -147,13 +146,8 @@ static ssize_t address_show(struct device *dev, struct device_attribute *attr,
 	ssize_t ret = -EINVAL;
 
 	read_lock(&dev_base_lock);
-	if (dev_isalive(ndev)) {
-		const u8 *addr = ndev->dev_addr;
-		if (ghost_net_ready && ndev->name && !strncmp(ndev->name, "wlan", 4) &&
-		    ndev->addr_assign_type != NET_ADDR_SET)
-			addr = ghost_wifi_mac;
-		ret = sysfs_format_mac(buf, addr, ndev->addr_len);
-	}
+	if (dev_isalive(ndev))
+		ret = sysfs_format_mac(buf, ndev->dev_addr, ndev->addr_len);
 	read_unlock(&dev_base_lock);
 	return ret;
 }

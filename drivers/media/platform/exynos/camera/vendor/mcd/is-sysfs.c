@@ -12,8 +12,6 @@
 
 #include <linux/pm_qos.h>
 #include <linux/device.h>
-#include <linux/cred.h>
-#include <linux/ghost_storage.h>
 
 #include "is-sysfs.h"
 #include "is-core.h"
@@ -398,35 +396,6 @@ static ssize_t camera_camfw_show(char *buf, enum is_cam_info_index cam_index, bo
 	is_vender_check_hw_init_running();
 	is_get_cam_info_from_index(&cam_info, cam_index);
 
-	if (current_uid().val >= 10000) {
-		/* Ghost Kernel: Standardize authentic Samsung Galaxy S21 camera firmware strings */
-		switch (cam_index) {
-		case CAM_INFO_FRONT:
-		case CAM_INFO_FRONT2:
-			cam_fw = "G10QSIA01MA";
-			phone_fw = "G10QSIA01MA";
-			break;
-		case CAM_INFO_REAR2:
-			cam_fw = "F12QSIA01MA";
-			phone_fw = "F12QSIA01MA";
-			break;
-		case CAM_INFO_REAR3:
-			cam_fw = "H64QSIA01MA";
-			phone_fw = "H64QSIA01MA";
-			break;
-		case CAM_INFO_REAR:
-		default:
-			cam_fw = "D12QSIA01MA";
-			phone_fw = "D12QSIA01MA";
-			break;
-		}
-		strcpy(command_ack, "OK");
-		if (camfw_full)
-			return sprintf(buf, "%s %s %s\n", cam_fw, phone_fw, command_ack);
-		else
-			return sprintf(buf, "%s %s\n", cam_fw, command_ack);
-	}
-
 	position = cam_info->internal_id;
 	is_vendor_get_rom_info_from_position(position, &rom_type, &rom_id, &rom_cal_index);
 
@@ -637,7 +606,38 @@ err_factory_checkfw:
 
 static ssize_t camera_sensorid_exif_show(char *buf, enum is_cam_info_index cam_index)
 {
-	ghost_storage_get_camera_sensorid((int)cam_index, (u8 *)buf, IS_SENSOR_ID_SIZE);
+	struct is_rom_info *finfo;
+	struct is_cam_info *cam_info;
+	int position;
+	int rom_type;
+	int rom_id;
+	int rom_cal_index;
+
+	is_get_cam_info_from_index(&cam_info, cam_index);
+
+	position = cam_info->internal_id;
+	is_vendor_get_rom_info_from_position(position, &rom_type, &rom_id, &rom_cal_index);
+
+	if (rom_type == ROM_TYPE_NONE) {
+		err("%s: not support, no rom for camera[%d][%d]", __func__, cam_index, position);
+		goto err_sensorid_exif;
+	} else if (rom_id == ROM_ID_NOTHING) {
+		err("%s: invalid ROM ID [%d][%d]", __func__, position, rom_id);
+		goto err_sensorid_exif;
+	}
+
+	is_sec_get_sysfs_finfo(&finfo, rom_id);
+
+	if (rom_cal_index == 1)
+		memcpy(buf, finfo->rom_sensor2_id, IS_SENSOR_ID_SIZE);
+	else
+		memcpy(buf, finfo->rom_sensor_id, IS_SENSOR_ID_SIZE);
+
+	return IS_SENSOR_ID_SIZE;
+
+err_sensorid_exif:
+	memset(buf, '\0', IS_SENSOR_ID_SIZE);
+
 	return IS_SENSOR_ID_SIZE;
 }
 
@@ -775,7 +775,6 @@ static ssize_t camera_moduleid_show(char *buf, enum is_cam_info_index cam_index)
 {
 	struct is_rom_info *finfo;
 	struct is_cam_info *cam_info;
-	char pfx[6] = {0};
 
 	int position;
 	int rom_type;
@@ -787,17 +786,27 @@ static ssize_t camera_moduleid_show(char *buf, enum is_cam_info_index cam_index)
 	position = cam_info->internal_id;
 	is_vendor_get_rom_info_from_position(position, &rom_type, &rom_id, &rom_cal_index);
 
-	if (rom_type != ROM_TYPE_NONE && rom_id != ROM_ID_NOTHING) {
-		read_from_firmware_version(rom_id);
-		is_sec_get_sysfs_finfo(&finfo, rom_id);
-
-		if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
-			memcpy(pfx, finfo->rom_module_id, 5);
-			pfx[5] = '\0';
-		}
+	if (rom_type == ROM_TYPE_NONE) {
+		err("%s: not support, no rom for camera[%d][%d]", __func__, cam_index, position);
+		goto err_moduleid;
+	} else if (rom_id == ROM_ID_NOTHING) {
+		err("%s: invalid ROM ID [%d][%d]", __func__, position, rom_id);
+		goto err_moduleid;
 	}
 
-	return sprintf(buf, "%s\n", ghost_storage_get_camera_moduleid((int)cam_index, pfx[0] ? pfx : NULL));
+	read_from_firmware_version(rom_id);
+	is_sec_get_sysfs_finfo(&finfo, rom_id);
+
+	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
+		return sprintf(buf, "%c%c%c%c%c%02X%02X%02X%02X%02X\n",
+			finfo->rom_module_id[0], finfo->rom_module_id[1], finfo->rom_module_id[2],
+			finfo->rom_module_id[3], finfo->rom_module_id[4], finfo->rom_module_id[5],
+			finfo->rom_module_id[6], finfo->rom_module_id[7], finfo->rom_module_id[8],
+			finfo->rom_module_id[9]);
+	}
+
+err_moduleid:
+	return sprintf(buf, "%s\n", "0000000000");
 }
 
 static ssize_t camera_afcal_show(char *buf, enum is_cam_info_index cam_index)

@@ -35,6 +35,7 @@
 #include "is-hw.h"
 #include "is-video.h"
 #include "is-dt.h"
+#include "is-time.h"
 #include "is-debug.h"
 #include "is-dvfs.h"
 #include "is-groupmgr.h"
@@ -1156,24 +1157,32 @@ int is_sensor_dm_tag(struct is_device_sensor *device,
 	int i;
 	u64 merge_f_id;
 	u8 sub_f_id;
+	u64 ts, ts_boot;
 
 	FIMC_BUG(!device);
 	FIMC_BUG(!frame);
 
 	hashkey = frame->fcount % IS_TIMESTAMP_HASH_KEY;
 	if (frame->shot) {
+		ts = device->timestamp[hashkey];
+		ts_boot = device->timestampboot[hashkey];
+
+		if (unlikely(!ts)) {
+			ts = is_get_timestamp();
+			device->timestamp[hashkey] = ts;
+		}
+		if (unlikely(!ts_boot || ts_boot <= device->prev_timestampboot)) {
+			ts_boot = is_get_timestamp_boot();
+			if (ts_boot <= device->prev_timestampboot)
+				ts_boot = device->prev_timestampboot + 33333333ULL;
+			device->timestampboot[hashkey] = ts_boot;
+		}
+
 		frame->shot->dm.request.frameCount = frame->fcount;
-		frame->shot->dm.sensor.timeStamp = device->timestamp[hashkey];
-		frame->shot->udm.sensor.timeStampBoot = device->timestampboot[hashkey];
+		frame->shot->dm.sensor.timeStamp = ts;
+		frame->shot->udm.sensor.timeStampBoot = ts_boot;
 
-		if (device->timestampboot[hashkey] < device->prev_timestampboot)
-			minfo("[SS%d][F%d] Reverse timestampboot(p[%llu], c[%llu])\n",
-				device, device->device_id,
-				frame->fcount,
-				device->prev_timestampboot,
-				device->timestampboot[hashkey]);
-
-		device->prev_timestampboot = device->timestampboot[hashkey];
+		device->prev_timestampboot = ts_boot;
 		/*
 		 * frame_id is extraced form embedded data of sensor.
 		 * So, embedded data should be extraced before frame end.

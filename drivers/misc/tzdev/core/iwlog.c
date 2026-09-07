@@ -125,15 +125,6 @@ static void tz_iwlog_buffer_print(const char *buf, unsigned int count)
 
 		ps->line[ps->line_len] = 0;
 
-		/* Ghost Kernel (Pillar 23): Neutralize TEE Keymaster unlock & compromise alerts */
-		if (strstr(ps->line + 1, "Device is compromized") ||
-		    strstr(ps->line + 1, "tz_check_oem")) {
-			ps->line_len = 0;
-			count -= bytes_in;
-			buf += bytes_in;
-			continue;
-		}
-
 		kern_log_level = tz_iwlog_convert_log_level(ps->line[0]);
 
 		bytes_printed = printk("%s" TZ_IWLOG_PREFIX	"%s\n", kern_log_level, ps->line + 1);

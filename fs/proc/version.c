@@ -5,16 +5,13 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/utsname.h>
-#include <linux/string.h>
 
 static int version_proc_show(struct seq_file *m, void *v)
 {
-	/* Ghost Kernel (Pillar 30): Normalize /proc/version to stock Samsung format */
-	seq_printf(m, "Linux version %s (%s) (%s) %s\n",
-		   utsname()->release,
-		   "dpi@SWDG4608",  /* Stock Samsung build user@host */
-		   "Android (8186898, based on r416183b) clang version 12.0.5",
-		   "#1 SMP PREEMPT Mon Dec 06 17:22:42 KST 2021");
+	seq_printf(m, linux_proc_banner,
+		utsname()->sysname,
+		utsname()->release,
+		utsname()->version);
 	return 0;
 }
 

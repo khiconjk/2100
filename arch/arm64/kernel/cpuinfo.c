@@ -24,8 +24,6 @@
 #include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/delay.h>
-#include <linux/cred.h>
-#include <linux/ghost_storage.h>
 
 /*
  * In case the boot CPU is hotpluggable, we record its initial state and
@@ -145,16 +143,9 @@ static int c_show(struct seq_file *m, void *v)
 			seq_printf(m, "model name\t: ARMv8 Processor rev %d (%s)\n",
 				   MIDR_REVISION(midr), COMPAT_ELF_PLATFORM);
 
-		/* Ghost Kernel (PLAN F): CPU BogoMIPS Silicon Batch Jitter for Untrusted Apps */
-		if (current_uid().val >= 10000) {
-			u32 bogo_seed = ghost_storage_get_tcp_isn_offset() ^ (u32)i;
-			unsigned long bogo_frac = 38 + ((bogo_seed ^ (bogo_seed >> 8)) % 5);
-			seq_printf(m, "BogoMIPS\t: 38.%02lu\n", bogo_frac);
-		} else {
-			seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
-				   loops_per_jiffy / (500000UL/HZ),
-				   loops_per_jiffy / (5000UL/HZ) % 100);
-		}
+		seq_printf(m, "BogoMIPS\t: %lu.%02lu\n",
+			   loops_per_jiffy / (500000UL/HZ),
+			   loops_per_jiffy / (5000UL/HZ) % 100);
 
 		/*
 		 * Dump out the common processor features in a single line.

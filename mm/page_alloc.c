@@ -58,7 +58,6 @@
 #include <linux/prefetch.h>
 #include <linux/mm_inline.h>
 #include <linux/migrate.h>
-#include <linux/ghost_storage.h>
 #include <linux/hugetlb.h>
 #include <linux/sched/rt.h>
 #include <linux/sched/mm.h>
@@ -5407,7 +5406,7 @@ EXPORT_SYMBOL_GPL(si_mem_available);
 
 void si_meminfo(struct sysinfo *val)
 {
-	val->totalram = totalram_pages() + ghost_storage_get_ram_delta_pages();
+	val->totalram = totalram_pages();
 #ifdef CONFIG_ION_RBIN_HEAP
 	val->totalram += totalrbin_pages;
 #endif

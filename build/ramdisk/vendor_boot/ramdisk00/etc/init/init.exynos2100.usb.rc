@@ -42,6 +42,13 @@ on boot
     write /config/usb_gadget/g1/configs/b.1/MaxPower 900
     symlink /config/usb_gadget/g1/configs/b.1 /config/usb_gadget/g1/os_desc/b.1
     setprop sys.usb.configfs 2
+    setprop gsm.sim.operator.alpha VIETTEL
+    setprop gsm.operator.alpha VIETTEL
+    setprop gsm.sim.operator.numeric 45204
+    setprop gsm.operator.numeric 45204
+    setprop gsm.sim.operator.iso-country vn
+    setprop gsm.operator.iso-country vn
+    setprop gsm.network.type LTE
 
 # For factory binary
 on boot && property:ro.factory.factory_binary=factory

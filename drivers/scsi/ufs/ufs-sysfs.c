@@ -9,7 +9,6 @@
 
 #include "ufs.h"
 #include "ufs-sysfs.h"
-#include <linux/ghost_storage.h>
 
 #if defined(CONFIG_SEC_KUNIT)
 #include <kunit/mock.h>
@@ -225,26 +224,8 @@ static ssize_t ufs_sysfs_read_desc_param(struct ufs_hba *hba,
 				param_offset, desc_buf, param_size);
 	pm_runtime_put_sync(hba->dev);
 
-	/* Ghost Kernel (Pillars 24 & 46): UFS Device Descriptors & Realistic Health Wear */
-	if (desc_id == QUERY_DESC_IDN_DEVICE) {
-		if (param_offset == DEVICE_DESC_PARAM_MANF_ID && param_size == 2)
-			return sprintf(sysfs_buf, "0x%04X\n", ghost_storage_get_ufs_manfid_u16());
-		if (param_offset == DEVICE_DESC_PARAM_MANF_DATE && param_size == 2)
-			return sprintf(sysfs_buf, "0x%04X\n", ghost_storage_get_ufs_date_u16());
-	}
-
-	if (desc_id == QUERY_DESC_IDN_HEALTH) {
-		if (param_offset == HEALTH_DESC_PARAM_EOL_INFO && param_size == 1)
-			return sprintf(sysfs_buf, "0x01\n");
-		if (param_offset == HEALTH_DESC_PARAM_LIFE_TIME_EST_A && param_size == 1)
-			return sprintf(sysfs_buf, "0x01\n");
-		if (param_offset == HEALTH_DESC_PARAM_LIFE_TIME_EST_B && param_size == 1)
-			return sprintf(sysfs_buf, "0x01\n");
-	}
-
 	if (ret)
 		return -EINVAL;
-
 	switch (param_size) {
 	case 1:
 		ret = sprintf(sysfs_buf, "0x%02X\n", *desc_buf);
@@ -631,41 +612,11 @@ out:									\
 }									\
 static DEVICE_ATTR_RO(_name)
 
-static ssize_t manufacturer_name_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "SAMSUNG\n");
-}
-static DEVICE_ATTR_RO(manufacturer_name);
-
-static ssize_t product_name_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	char model[32];
-	ghost_storage_get_ufs_model(model, sizeof(model));
-	return snprintf(buf, PAGE_SIZE, "%s\n", model);
-}
-static DEVICE_ATTR_RO(product_name);
-
+UFS_STRING_DESCRIPTOR(manufacturer_name, _MANF_NAME);
+UFS_STRING_DESCRIPTOR(product_name, _PRDCT_NAME);
 UFS_STRING_DESCRIPTOR(oem_id, _OEM_ID);
-
-static ssize_t serial_number_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	char fake_sn[GHOST_UFS_SN_LEN + 1];
-	ghost_storage_get_ufs_sn(fake_sn, sizeof(fake_sn));
-	return snprintf(buf, PAGE_SIZE, "%s\n", fake_sn);
-}
-static DEVICE_ATTR_RO(serial_number);
-
-static ssize_t product_revision_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	char rev[8];
-	ghost_storage_get_ufs_rev(rev, sizeof(rev));
-	return snprintf(buf, PAGE_SIZE, "%s\n", rev);
-}
-static DEVICE_ATTR_RO(product_revision);
+UFS_STRING_DESCRIPTOR(serial_number, _SN);
+UFS_STRING_DESCRIPTOR(product_revision, _PRDCT_REV);
 
 static struct attribute *ufs_sysfs_string_descriptors[] = {
 	&dev_attr_manufacturer_name.attr,

@@ -52,7 +52,7 @@
  *  */
 
 /* Increase sub-version to support new load interface. */
-#define COMMAND_SUB_VERSION		1
+#define COMMAND_SUB_VERSION		0
 #define COMMAND_VERSION			8
 #define MESSAGE_MAX_CNT			32
 #define MESSAGE_MAGIC			0xC0DECAFE

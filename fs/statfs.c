@@ -13,7 +13,6 @@
 #include <linux/susfs_def.h>
 #include "mount.h"
 #endif // #if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
-#include <linux/ghost_storage.h>
 #include "internal.h"
 
 static int flags_by_mnt(int mnt_flags)
@@ -119,10 +118,8 @@ int vfs_statfs(const struct path *path, struct kstatfs *buf)
 			goto orig_flow;
 		}
 		error = statfs_by_dentry(no_sus_vfsmnt->mnt_root, buf);
-		if (!error) {
+		if (!error)
 			buf->f_flags = calculate_f_flags(no_sus_vfsmnt);
-			ghost_storage_apply_statfs_geometry(path, buf);
-		}
 		dput(no_sus_vfsmnt->mnt_root);
 		mntput(no_sus_vfsmnt);
 		return error;
@@ -134,10 +131,8 @@ orig_flow:
 #endif // #if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
 
 	error = statfs_by_dentry(path->dentry, buf);
-	if (!error) {
+	if (!error)
 		buf->f_flags = calculate_f_flags(path->mnt);
-		ghost_storage_apply_statfs_geometry(path, buf);
-	}
 	return error;
 
 }

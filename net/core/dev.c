@@ -108,7 +108,6 @@
 #include <linux/highmem.h>
 #include <linux/init.h>
 #include <linux/module.h>
-#include <linux/ghost_net.h>
 #include <linux/netpoll.h>
 #include <linux/rcupdate.h>
 #include <linux/delay.h>
@@ -8643,14 +8642,9 @@ int dev_get_mac_address(struct sockaddr *sa, struct net *net, char *dev_name)
 	}
 	if (!dev->addr_len)
 		memset(sa->sa_data, 0, size);
-	else {
-		const u8 *addr = dev->dev_addr;
-		if (ghost_net_ready && dev->name[0] && !strncmp(dev->name, "wlan", 4) &&
-		    dev->addr_assign_type != NET_ADDR_SET)
-			addr = ghost_wifi_mac;
-		memcpy(sa->sa_data, addr,
+	else
+		memcpy(sa->sa_data, dev->dev_addr,
 		       min_t(size_t, size, dev->addr_len));
-	}
 	sa->sa_family = dev->type;
 
 unlock:

@@ -52,17 +52,10 @@ static ssize_t light_lux_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct ssp_data *data = dev_get_drvdata(dev);
-	u32 r = data->buf[UNCAL_LIGHT_SENSOR].light_t.r;
-	u32 g = data->buf[UNCAL_LIGHT_SENSOR].light_t.g;
-	u32 b = data->buf[UNCAL_LIGHT_SENSOR].light_t.b;
-	u32 w = data->buf[UNCAL_LIGHT_SENSOR].light_t.w;
-
-	if (r == 0 && g == 0 && b == 0 && w == 0) {
-		r = 2; g = 3; b = 1; w = 4;
-	}
 
 	return sprintf(buf, "%u,%u,%u,%u,%u,%u\n",
-		r, g, b, w,
+		data->buf[UNCAL_LIGHT_SENSOR].light_t.r, data->buf[UNCAL_LIGHT_SENSOR].light_t.g,
+		data->buf[UNCAL_LIGHT_SENSOR].light_t.b, data->buf[UNCAL_LIGHT_SENSOR].light_t.w,
 		data->buf[UNCAL_LIGHT_SENSOR].light_t.a_time, data->buf[UNCAL_LIGHT_SENSOR].light_t.a_gain);
 }
 
@@ -70,17 +63,10 @@ static ssize_t light_data_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct ssp_data *data = dev_get_drvdata(dev);
-	u32 r = data->buf[UNCAL_LIGHT_SENSOR].light_t.r;
-	u32 g = data->buf[UNCAL_LIGHT_SENSOR].light_t.g;
-	u32 b = data->buf[UNCAL_LIGHT_SENSOR].light_t.b;
-	u32 w = data->buf[UNCAL_LIGHT_SENSOR].light_t.w;
-
-	if (r == 0 && g == 0 && b == 0 && w == 0) {
-		r = 2; g = 3; b = 1; w = 4;
-	}
 
 	return sprintf(buf, "%u,%u,%u,%u,%u,%u\n",
-		r, g, b, w,
+		data->buf[UNCAL_LIGHT_SENSOR].light_t.r, data->buf[UNCAL_LIGHT_SENSOR].light_t.g,
+		data->buf[UNCAL_LIGHT_SENSOR].light_t.b, data->buf[UNCAL_LIGHT_SENSOR].light_t.w,
 		data->buf[UNCAL_LIGHT_SENSOR].light_t.a_time, data->buf[UNCAL_LIGHT_SENSOR].light_t.a_gain);
 }
 

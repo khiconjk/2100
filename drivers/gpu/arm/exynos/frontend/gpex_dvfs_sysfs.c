@@ -25,8 +25,6 @@
 
 #include "gpex_dvfs_internal.h"
 #include "gpu_dvfs_governor.h"
-#include <linux/cred.h>
-#include <linux/sched/clock.h>
 
 static struct dvfs_info *dvfs;
 
@@ -434,14 +432,9 @@ CREATE_SYSFS_DEVICE_WRITE_FUNCTION(set_polling_speed);
 static ssize_t show_utilization(char *buf)
 {
 	ssize_t ret = 0;
-	int util = gpex_pm_get_status(true) * dvfs->env_data.utilization;
 
-	if (current_uid().val >= 10000 && util == 0) {
-		/* Ghost Kernel: Dynamic GPU Activity Jitter (4% - 18%) for unprivileged apps */
-		util = 4 + (int)((sched_clock() >> 22) % 15);
-	}
-
-	ret += snprintf(buf + ret, PAGE_SIZE - ret, "%d", util);
+	ret += snprintf(buf + ret, PAGE_SIZE - ret, "%d",
+			gpex_pm_get_status(true) * dvfs->env_data.utilization);
 
 	if (ret < PAGE_SIZE - 1) {
 		ret += snprintf(buf + ret, PAGE_SIZE - ret, "\n");
@@ -458,14 +451,8 @@ CREATE_SYSFS_DEVICE_READ_FUNCTION(show_utilization);
 static ssize_t show_kernel_sysfs_utilization(char *buf)
 {
 	ssize_t ret = 0;
-	int util = dvfs->env_data.utilization;
 
-	if (current_uid().val >= 10000 && util == 0) {
-		/* Ghost Kernel: Dynamic GPU Activity Jitter (4% - 18%) for unprivileged apps */
-		util = 4 + (int)((sched_clock() >> 22) % 15);
-	}
-
-	ret += snprintf(buf + ret, PAGE_SIZE - ret, "%3d%%", util);
+	ret += snprintf(buf + ret, PAGE_SIZE - ret, "%3d%%", dvfs->env_data.utilization);
 
 	if (ret < PAGE_SIZE - 1) {
 		ret += snprintf(buf + ret, PAGE_SIZE - ret, "\n");

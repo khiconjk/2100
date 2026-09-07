@@ -193,17 +193,6 @@ static struct device_attribute dev_attr_fail =
 	__ATTR(make-it-fail, 0644, part_fail_show, part_fail_store);
 #endif
 
-static ssize_t part_uuid_show(struct device *dev,
-			      struct device_attribute *attr, char *buf)
-{
-	struct hd_struct *p = dev_to_part(dev);
-
-	if (p->info && p->info->uuid[0])
-		return sprintf(buf, "%s\n", p->info->uuid);
-	return 0;
-}
-static DEVICE_ATTR(partuuid, 0444, part_uuid_show, NULL);
-
 static struct attribute *part_attrs[] = {
 	&dev_attr_partition.attr,
 	&dev_attr_start.attr,
@@ -213,7 +202,6 @@ static struct attribute *part_attrs[] = {
 	&dev_attr_discard_alignment.attr,
 	&dev_attr_stat.attr,
 	&dev_attr_inflight.attr,
-	&dev_attr_partuuid.attr,
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 	&dev_attr_fail.attr,
 #endif
@@ -247,8 +235,6 @@ static int part_uevent(struct device *dev, struct kobj_uevent_env *env)
 	add_uevent_var(env, "PARTN=%u", part->partno);
 	if (part->info && part->info->volname[0])
 		add_uevent_var(env, "PARTNAME=%s", part->info->volname);
-	if (part->info && part->info->uuid[0])
-		add_uevent_var(env, "PARTUUID=%s", part->info->uuid);
 	return 0;
 }
 

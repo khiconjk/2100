@@ -38,7 +38,6 @@
 
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/ghost_net.h>
 #include <linux/slab.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>

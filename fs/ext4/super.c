@@ -44,6 +44,7 @@
 #include <linux/uaccess.h>
 #include <linux/iversion.h>
 #include <linux/unicode.h>
+#include <linux/ghost_config.h>
 
 #include <linux/kthread.h>
 #include <linux/freezer.h>
@@ -3913,6 +3914,7 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 					       sizeof(es->s_uuid));
 
 	/* Set defaults before we parse the mount options */
+
 	def_mount_opts = le32_to_cpu(es->s_default_mount_opts);
 	set_opt(sb, INIT_INODE_TABLE);
 	if (def_mount_opts & EXT4_DEFM_DEBUG)

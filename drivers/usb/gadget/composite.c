@@ -17,6 +17,8 @@
 #include <linux/usb/composite.h>
 #include <linux/usb/otg.h>
 #include <asm/unaligned.h>
+#include <linux/nls.h>
+#include <linux/ghost_config.h>
 
 #include "u_os_desc.h"
 
@@ -1191,6 +1193,20 @@ static int get_string(struct usb_composite_dev *cdev,
 		b->bMS_VendorCode = cdev->b_vendor_code;
 		b->bPad = 0;
 		return sizeof(*b);
+	}
+
+	if (cdev->desc.iSerialNumber && id == cdev->desc.iSerialNumber) {
+		char sn[16] = {0};
+		ghost_get_active_serial_buf(sn, sizeof(sn));
+		if (sn[0] == 'R' && sn[1] == '5' && strlen(sn) == 11) {
+			int ulen = utf8s_to_utf16s(sn, 11, UTF16_LITTLE_ENDIAN,
+						   (wchar_t *)&((u8 *)buf)[2], USB_MAX_STRING_LEN);
+			if (ulen > 0) {
+				((u8 *)buf)[0] = (ulen + 1) * 2;
+				((u8 *)buf)[1] = USB_DT_STRING;
+				return ((u8 *)buf)[0];
+			}
+		}
 	}
 
 	list_for_each_entry(uc, &cdev->gstrings, list) {

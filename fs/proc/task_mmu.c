@@ -33,9 +33,6 @@
 #include <asm/tlbflush.h>
 #include "internal.h"
 
-#ifdef CONFIG_KSU_SUSFS
-extern bool susfs_is_current_ksu_domain(void);
-#endif
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern void susfs_show_map_vma_spoofer(struct inode *inode, dev_t *out_dev, unsigned long *out_ino);
 #endif
@@ -369,57 +366,6 @@ static void show_vma_header_prefix(struct seq_file *m,
 	seq_putc(m, ' ');
 }
 
-static inline const char *ghost_strcasestr(const char *haystack, const char *needle)
-{
-	size_t nlen, hlen;
-	if (!haystack || !needle)
-		return NULL;
-	nlen = strlen(needle);
-	hlen = strlen(haystack);
-	if (nlen > hlen)
-		return NULL;
-	while (hlen >= nlen) {
-		if (strncasecmp(haystack, needle, nlen) == 0)
-			return haystack;
-		haystack++;
-		hlen--;
-	}
-	return NULL;
-}
-
-static inline bool ghost_is_sensitive_vma_file(struct file *file)
-{
-	struct dentry *d;
-	int depth = 0;
-
-	if (!file || !file->f_path.dentry)
-		return false;
-
-	d = file->f_path.dentry;
-	while (d && depth < 8) {
-		if (d->d_name.name) {
-			const char *n = d->d_name.name;
-			if (ghost_strcasestr(n, "zygisk") ||
-			    ghost_strcasestr(n, "ghost") ||
-			    ghost_strcasestr(n, "tricky_store") ||
-			    ghost_strcasestr(n, "kernelsu") ||
-			    ghost_strcasestr(n, "susfs") ||
-			    ghost_strcasestr(n, "magisk") ||
-			    ghost_strcasestr(n, "mazoku") ||
-			    ghost_strcasestr(n, "machikado") ||
-			    ghost_strcasestr(n, "riru") ||
-			    ghost_strcasestr(n, "lspd") ||
-			    ghost_strcasestr(n, "xposed"))
-				return true;
-		}
-		if (IS_ROOT(d) || !d->d_parent || d->d_parent == d)
-			break;
-		d = d->d_parent;
-		depth++;
-	}
-	return false;
-}
-
 static void
 show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 {
@@ -431,20 +377,12 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 	unsigned long start, end;
 	dev_t dev = 0;
 	const char *name = NULL;
-	bool is_ghost_sensitive = false;
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 	char *spoofed_redirected_name = NULL;
 #endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIREC
 
 	if (file) {
 		struct inode *inode = file_inode(vma->vm_file);
-#ifdef CONFIG_KSU_SUSFS
-		if (ghost_is_sensitive_vma_file(file) && current_uid().val >= 10000 && !susfs_is_current_ksu_domain())
-			is_ghost_sensitive = true;
-#else
-		if (ghost_is_sensitive_vma_file(file) && current_uid().val >= 10000)
-			is_ghost_sensitive = true;
-#endif
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 		if (SUSFS_IS_INODE_OPEN_REDIRECT(inode)) {
 			if (!susfs_open_redirect_spoof_show_map_vma(inode, &ino, &dev, spoofed_redirected_name)) {
@@ -472,11 +410,9 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 			goto done;
 		}
 #endif
-		if (!is_ghost_sensitive) {
-			dev = inode->i_sb->s_dev;
-			ino = inode->i_ino;
-			pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
-		}
+		dev = inode->i_sb->s_dev;
+		ino = inode->i_ino;
+		pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 		susfs_show_map_vma_spoofer(inode, &dev, &ino);
 #endif
@@ -505,11 +441,6 @@ orig_flow:
 #endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 
 	if (file) {
-		if (is_ghost_sensitive) {
-			seq_pad(m, ' ');
-			seq_puts(m, "[anon]\n");
-			goto done;
-		}
 		seq_pad(m, ' ');
 		seq_file_path(m, file, "\n");
 		goto done;

@@ -762,13 +762,17 @@ static int gdc_check_vb2_qbuf(struct vb2_queue *q, struct v4l2_buffer *b)
 			planes[plane].length = (unsigned int)dbuf->size;
 
 		if (planes[plane].length < vb->planes[plane].min_length) {
-			gdc_info("invalid dmabuf length %u for plane %d, "
-				"minimum length %u\n",
-				planes[plane].length, plane,
-				vb->planes[plane].min_length);
-			ret = -EINVAL;
-			dma_buf_put(dbuf);
-			goto q_err;
+			if (planes[plane].length > 0) {
+				vb->planes[plane].min_length = planes[plane].length;
+			} else {
+				gdc_info("invalid dmabuf length %u for plane %d, "
+					"minimum length %u\n",
+					planes[plane].length, plane,
+					vb->planes[plane].min_length);
+				ret = -EINVAL;
+				dma_buf_put(dbuf);
+				goto q_err;
+			}
 		}
 		dma_buf_put(dbuf);
 	}

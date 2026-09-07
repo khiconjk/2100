@@ -11,7 +11,6 @@
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
 #include <linux/sec_debug.h>
-#include <linux/ghost_net.h>
 #include <dt-bindings/soc/samsung/exynos2100-debug.h>
 
 #include "sec_debug_internal.h"
@@ -51,10 +50,6 @@ static ssize_t secdbg_logb_read(struct file *file, char __user *buf,
 	ssize_t count, ret = 0;
 	unsigned long log_pa, log_sz;
 	void *log_va;
-	char *kbuf;
-
-	if (current_uid().val != 0)
-		return -ENOENT;
 
 	log_va = NULL;
 	log_pa = 0;
@@ -101,21 +96,11 @@ static ssize_t secdbg_logb_read(struct file *file, char __user *buf,
 
 	count = min(len, (size_t)(log_sz - pos));
 
-	kbuf = kmalloc(count, GFP_KERNEL);
-	if (kbuf) {
-		memcpy(kbuf, log_va + pos, count);
-		ghost_sanitize_boot_kmsg_buffer(kbuf, count);
-		if (copy_to_user(buf, kbuf, count)) {
-			kfree(kbuf);
-			ret = -EFAULT;
-			goto fail;
-		}
-		kfree(kbuf);
-	} else {
-		if (copy_to_user(buf, log_va + pos, count)) {
-			ret = -EFAULT;
-			goto fail;
-		}
+	if (copy_to_user(buf, log_va + pos, count)) {
+		pr_crit("%s: fail to copy to use\n", __func__);
+
+		ret = -EFAULT;
+		goto fail;
 	}
 
 	*offset += count;

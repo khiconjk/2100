@@ -1,4 +1,0 @@
-allow untrusted_app proc_ghost_widevine_raw file { read open getattr }
-allow untrusted_app_all proc_ghost_widevine_raw file { read open getattr }
-allow system_app proc_ghost_widevine_raw file { read open getattr }
-allow platform_app proc_ghost_widevine_raw file { read open getattr }

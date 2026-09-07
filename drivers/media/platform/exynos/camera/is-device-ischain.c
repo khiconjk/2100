@@ -6533,8 +6533,7 @@ static int is_ischain_paf_shot(struct is_device_ischain *device,
 
 	frame->shot->ctl.vendor_entry.lowIndexParam = 0;
 	frame->shot->ctl.vendor_entry.highIndexParam = 0;
-	frame->shot->dm.vendor_entry.lowIndexParam = 0;
-	frame->shot->dm.vendor_entry.highIndexParam = 0;
+	/* dm.vendor_entry removed to match userspace HAL */
 	node_group = &frame->shot_ext->node_group;
 
 	PROGRAM_COUNT(8);
@@ -6812,8 +6811,7 @@ static int is_ischain_3aa_shot(struct is_device_ischain *device,
 
 	frame->shot->ctl.vendor_entry.lowIndexParam = 0;
 	frame->shot->ctl.vendor_entry.highIndexParam = 0;
-	frame->shot->dm.vendor_entry.lowIndexParam = 0;
-	frame->shot->dm.vendor_entry.highIndexParam = 0;
+	/* dm.vendor_entry removed to match userspace HAL */
 	node_group = &frame->shot_ext->node_group;
 
 	PROGRAM_COUNT(8);
@@ -7078,8 +7076,7 @@ static int is_ischain_lme_shot(struct is_device_ischain *device,
 
 	frame->shot->ctl.vendor_entry.lowIndexParam = 0;
 	frame->shot->ctl.vendor_entry.highIndexParam = 0;
-	frame->shot->dm.vendor_entry.lowIndexParam = 0;
-	frame->shot->dm.vendor_entry.highIndexParam = 0;
+	/* dm.vendor_entry removed to match userspace HAL */
 	node_group = &frame->shot_ext->node_group;
 
 	PROGRAM_COUNT(8);
@@ -7250,8 +7247,7 @@ static int is_ischain_isp_shot(struct is_device_ischain *device,
 
 	frame->shot->ctl.vendor_entry.lowIndexParam = 0;
 	frame->shot->ctl.vendor_entry.highIndexParam = 0;
-	frame->shot->dm.vendor_entry.lowIndexParam = 0;
-	frame->shot->dm.vendor_entry.highIndexParam = 0;
+	/* dm.vendor_entry removed to match userspace HAL */
 	node_group = &frame->shot_ext->node_group;
 
 	PROGRAM_COUNT(8);
@@ -7410,8 +7406,7 @@ static int is_ischain_ypp_shot(struct is_device_ischain *device,
 
 	frame->shot->ctl.vendor_entry.lowIndexParam = 0;
 	frame->shot->ctl.vendor_entry.highIndexParam = 0;
-	frame->shot->dm.vendor_entry.lowIndexParam = 0;
-	frame->shot->dm.vendor_entry.highIndexParam = 0;
+	/* dm.vendor_entry removed to match userspace HAL */
 	node_group = &frame->shot_ext->node_group;
 
 	PROGRAM_COUNT(8);
@@ -7547,8 +7542,7 @@ static int is_ischain_mcs_shot(struct is_device_ischain *device,
 
 	frame->shot->ctl.vendor_entry.lowIndexParam = 0;
 	frame->shot->ctl.vendor_entry.highIndexParam = 0;
-	frame->shot->dm.vendor_entry.lowIndexParam = 0;
-	frame->shot->dm.vendor_entry.highIndexParam = 0;
+	/* dm.vendor_entry removed to match userspace HAL */
 	node_group = &frame->shot_ext->node_group;
 
 	PROGRAM_COUNT(8);
@@ -7674,8 +7668,7 @@ static int is_ischain_vra_shot(struct is_device_ischain *device,
 
 	frame->shot->ctl.vendor_entry.lowIndexParam = 0;
 	frame->shot->ctl.vendor_entry.highIndexParam = 0;
-	frame->shot->dm.vendor_entry.lowIndexParam = 0;
-	frame->shot->dm.vendor_entry.highIndexParam = 0;
+	/* dm.vendor_entry removed to match userspace HAL */
 	node_group = &frame->shot_ext->node_group;
 
 	PROGRAM_COUNT(8);
@@ -7786,8 +7779,7 @@ static int is_ischain_clh_shot(struct is_device_ischain *device,
 
 	frame->shot->ctl.vendor_entry.lowIndexParam = 0;
 	frame->shot->ctl.vendor_entry.highIndexParam = 0;
-	frame->shot->dm.vendor_entry.lowIndexParam = 0;
-	frame->shot->dm.vendor_entry.highIndexParam = 0;
+	/* dm.vendor_entry removed to match userspace HAL */
 	node_group = &frame->shot_ext->node_group;
 
 	PROGRAM_COUNT(8);

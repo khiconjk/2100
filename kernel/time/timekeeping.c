@@ -1232,7 +1232,7 @@ int do_settimeofday64(const struct timespec64 *ts)
 
 	/* Keep all absolute external time sources in the same ghost epoch. */
 	adjusted_ts = *ts;
-	ghost_uptime_apply_realtime_for_settimeofday(&adjusted_ts);
+	/* ghost_uptime_apply_realtime_for_settimeofday disabled */
 	ts = &adjusted_ts;
 
 	if (!timespec64_valid_settod(ts))
@@ -1561,8 +1561,8 @@ void __init timekeeping_init(void)
 	if (timespec64_compare(&wall_time, &boot_offset) < 0)
 		boot_offset = (struct timespec64){0};
 
-	ghost_uptime_apply_boot_offset(&boot_offset, &sleep_offset, wall_time.tv_sec);
-	ghost_uptime_apply_realtime(&wall_time);
+	/* ghost_uptime_apply_boot_offset disabled for system stability */
+	/* ghost_uptime_apply_realtime disabled for system stability */
 
 	wall_to_mono = timespec64_sub(boot_offset, wall_time);
 

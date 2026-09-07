@@ -13,7 +13,6 @@
 #include <linux/irqnr.h>
 #include <linux/sched/cputime.h>
 #include <linux/tick.h>
-#include <linux/ghost_uptime.h>
 
 #ifndef arch_irq_stat_cpu
 #define arch_irq_stat_cpu(cpu) 0
@@ -119,7 +118,6 @@ static int show_stat(struct seq_file *p, void *v)
 		irq = softirq = steal = 0;
 	guest = guest_nice = 0;
 	getboottime64(&boottime);
-	ghost_uptime_apply_realtime(&boottime);
 
 	for_each_possible_cpu(i) {
 		struct kernel_cpustat *kcs = &kcpustat_cpu(i);

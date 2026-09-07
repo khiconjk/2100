@@ -24,7 +24,6 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/mount.h>
-#include <linux/cred.h>
 
 #include <linux/uaccess.h>
 
@@ -357,14 +356,6 @@ static int proc_reg_open(struct inode *inode, struct file *file)
 	 */
 	if (!use_pde(pde))
 		return -ENOENT;
-
-	/* Ghost Kernel (Pillar 29): Stealth Proc Protection - Return -ENOENT for unprivileged apps */
-	if (current_uid().val >= 10000 && pde && pde->name) {
-		if (!strncmp(pde->name, "ghost_", 6)) {
-			unuse_pde(pde);
-			return -ENOENT;
-		}
-	}
 
 	release = pde->proc_fops->release;
 	if (release) {

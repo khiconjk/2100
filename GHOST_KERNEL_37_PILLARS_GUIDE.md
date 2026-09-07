@@ -1,9 +1,9 @@
 # 📖 CẨM NANG TOÀN THƯ KỸ THUẬT: 37 TRỤ CỘT GHOST KERNEL (SAMSUNG GALAXY S21 5G / EXYNOS 2100)
 
-> **Dự án**: Ghost Kernel Unified Identity & Anti-Detection Defense System  
-> **Thiết bị mục tiêu**: Samsung Galaxy S21 5G (SM-G991B / o1s / Universal2100)  
-> **Kiến trúc Kernel**: Linux 5.4.129 (Android 12 One UI 4.0 - GKI 1.0)  
-> **Cơ chế nạp**: AnyKernel3 All-In-One Unified Flashable Package  
+> **Dự án**: Ghost Kernel Unified Identity & Anti-Detection Defense System
+> **Thiết bị mục tiêu**: Samsung Galaxy S21 5G (SM-G991B / o1s / Universal2100)
+> **Kiến trúc Kernel**: Linux 5.4.129 (Android 12 One UI 4.0 - GKI 1.0)
+> **Cơ chế nạp**: AnyKernel3 All-In-One Unified Flashable Package
 
 ---
 
@@ -668,6 +668,6 @@ graph TD
 
 ## 🎯 KẾT LUẬN & CAM KẾT VẬN HÀNH
 
-Hệ thống **45 Trụ Cột Ghost Kernel** là một giải pháp phòng thủ toàn diện từ tầng thấp nhất của phần cứng (eFuse, SCSI, Baseband, MAC, eMMC/UFS) qua tầng trung gian của nhân hệ điều hành Linux (VFS, Timekeeping, Netfilter, Printk, Procfs, Execve) đến tầng cao nhất của Android Framework và Google Play Services (Per-App SSAID, GSF ID, SettingsProvider, SystemProperties, Zygisk DRM, Package Manager). 
+Hệ thống **45 Trụ Cột Ghost Kernel** là một giải pháp phòng thủ toàn diện từ tầng thấp nhất của phần cứng (eFuse, SCSI, Baseband, MAC, eMMC/UFS) qua tầng trung gian của nhân hệ điều hành Linux (VFS, Timekeeping, Netfilter, Printk, Procfs, Execve) đến tầng cao nhất của Android Framework và Google Play Services (Per-App SSAID, GSF ID, SettingsProvider, SystemProperties, Zygisk DRM, Package Manager).
 
 Tất cả tạo nên một thiết bị di động **Samsung Galaxy S21 5G** hoàn hảo như một người dùng thật đã sử dụng điện thoại tự nhiên trong nhiều tháng, triệt tiêu $100\%$ các điểm bất thường và đánh bại mọi hệ thống Anti-Fraud / Device Fingerprinting hiện đại nhất trên thế giới.

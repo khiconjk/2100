@@ -33,7 +33,6 @@
 #include "modem_prj.h"
 #include "modem_utils.h"
 #include "modem_dump.h"
-#include <linux/ghost_net.h>
 
 static int ipc_open(struct inode *inode, struct file *filp)
 {
@@ -560,11 +559,6 @@ static ssize_t ipc_read(struct file *filp, char *buf, size_t count,
 	}
 
 	copied = skb->len > count ? count : skb->len;
-
-	if (iod->ch == SIPC_CH_ID_RAW_0 || iod->ch == SIPC_CH_ID_RAW_5 ||
-	    iod->ch == SIPC_CH_ID_RAW_6 || iod->ch == SIPC_CH_ID_CASS) {
-		ghost_telecom_filter_ipc_data(skb->data, copied);
-	}
 
 	if (copy_to_user(buf, skb->data, copied)) {
 		mif_err("%s: ERR! copy_to_user fail\n", iod->name);

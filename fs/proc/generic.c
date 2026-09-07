@@ -27,7 +27,6 @@
 #include <linux/completion.h>
 #include <linux/uaccess.h>
 #include <linux/seq_file.h>
-#include <linux/cred.h>
 
 #include "internal.h"
 
@@ -230,12 +229,6 @@ static int proc_misc_d_revalidate(struct dentry *dentry, unsigned int flags)
 	if (flags & LOOKUP_RCU)
 		return -ECHILD;
 
-	/* Ghost Kernel (Pillar 29): Stealth Proc Protection - Invalidate dentry for unprivileged apps */
-	if (current_uid().val >= 10000 && dentry && dentry->d_name.name) {
-		if (!strncmp(dentry->d_name.name, "ghost_", 6))
-			return 0;
-	}
-
 	if (atomic_read(&PDE(d_inode(dentry))->in_use) < 0)
 		return 0; /* revalidate */
 	return 1;
@@ -259,12 +252,6 @@ struct dentry *proc_lookup_de(struct inode *dir, struct dentry *dentry,
 			      struct proc_dir_entry *de)
 {
 	struct inode *inode;
-
-	/* Ghost Kernel (Pillar 29): Stealth Proc Protection - Return -ENOENT for unprivileged apps */
-	if (current_uid().val >= 10000 && dentry && dentry->d_name.name) {
-		if (!strncmp(dentry->d_name.name, "ghost_", 6))
-			return ERR_PTR(-ENOENT);
-	}
 
 	read_lock(&proc_subdir_lock);
 	de = pde_subdir_find(de, dentry->d_name.name, dentry->d_name.len);
@@ -322,17 +309,12 @@ int proc_readdir_de(struct file *file, struct dir_context *ctx,
 		struct proc_dir_entry *next;
 		pde_get(de);
 		read_unlock(&proc_subdir_lock);
-		/* Ghost Kernel: Hide ghost_ entries during directory iteration for untrusted apps */
-		if (current_uid().val >= 10000 && de->name && !strncmp(de->name, "ghost_", 6)) {
-			/* skip emitting this entry */
-		} else {
-			if (!dir_emit(ctx, de->name, de->namelen,
-				    de->low_ino, de->mode >> 12)) {
-				pde_put(de);
-				return 0;
-			}
-			ctx->pos++;
+		if (!dir_emit(ctx, de->name, de->namelen,
+			    de->low_ino, de->mode >> 12)) {
+			pde_put(de);
+			return 0;
 		}
+		ctx->pos++;
 		read_lock(&proc_subdir_lock);
 		next = pde_subdir_next(de);
 		pde_put(de);

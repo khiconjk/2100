@@ -21,12 +21,13 @@
 #include <linux/math64.h>
 #include <linux/printk.h>
 #include <linux/proc_fs.h>
-#include <linux/random.h>
 #include <linux/sched.h>
 #include <linux/seq_file.h>
 #include <linux/stat.h>
 #include <linux/string.h>
 #include <linux/timex.h>
+#include <linux/time.h>
+#include <linux/timekeeping.h>
 #include <uapi/linux/magic.h>
 
 #define GHOST_UPTIME_MIN_DAYS	15ULL
@@ -37,166 +38,9 @@
 	((GHOST_UPTIME_MAX_DAYS - GHOST_UPTIME_MIN_DAYS) * \
 	 GHOST_UPTIME_DAY_SECS + 1ULL)
 
-/* === GHOST IMEI RANDOM PER BOOT (DUAL SIM SM-G991B/DS) === */
-static char ghost_imei_buf[17];
-static char ghost_imei2_buf[17];
-static u8 ghost_imei_bcd_buf[8] = {0};
-static u8 ghost_imei2_bcd_buf[8] = {0};
-static bool ghost_imei_ready;
-static DEFINE_MUTEX(ghost_imei_mutex);
-
-static const char * const g991b_tacs[] = {
-	"35971387", "35966984", "35918923", "35906784", "35895793",
-	"35844692", "35833295", "35814433", "35787240", "35471978"
-};
-
-static const u8 luhn_doubled[10] = {0, 2, 4, 6, 8, 1, 3, 5, 7, 9};
-
-static void ghost_build_imei_bcd_generic(const char *imei_str, u8 *out_bcd)
-{
-	int i;
-	/* 3GPP TS 24.008 10.5.1.4:
-	 * Byte 0: low nibble = 0x0A (type of identity), high nibble = digit 1
-	 * Byte 1..7: low nibble = digit 2N, high nibble = digit 2N+1
-	 */
-	out_bcd[0] = ((imei_str[0] - '0') << 4) | 0x0A;
-	for (i = 1; i < 8; i++) {
-		u8 d_even = (2 * i - 1 < 15) ? (imei_str[2 * i - 1] - '0') : 0x0F;
-		u8 d_odd  = (2 * i < 15) ? (imei_str[2 * i] - '0') : 0x0F;
-		out_bcd[i] = (d_odd << 4) | (d_even & 0x0F);
-	}
-}
-
-static void ghost_generate_g991b_imei(void)
-{
-	u8 rand_tac_idx;
-	u8 rand_snr[6];
-	u8 rand_snr2[6];
-	const char *tac1, *tac2;
-	int sum = 0, sum2 = 0;
-	int val, val2;
-	int i;
-	u8 tac2_offset;
-
-	/* Select two DIFFERENT TACs for dual SIM — real Samsung S21 Dual
-	 * always has distinct TACs per modem slot. */
-	get_random_bytes(&rand_tac_idx, 1);
-	tac1 = g991b_tacs[rand_tac_idx % ARRAY_SIZE(g991b_tacs)];
-	get_random_bytes(&tac2_offset, 1);
-	tac2 = g991b_tacs[(rand_tac_idx + 1 + (tac2_offset % (ARRAY_SIZE(g991b_tacs) - 1))) % ARRAY_SIZE(g991b_tacs)];
-
-	memcpy(ghost_imei_buf, tac1, 8);
-	memcpy(ghost_imei2_buf, tac2, 8);
-
-	get_random_bytes(rand_snr, sizeof(rand_snr));
-	get_random_bytes(rand_snr2, sizeof(rand_snr2));
-	for (i = 0; i < 6; i++) {
-		ghost_imei_buf[8 + i] = '0' + (rand_snr[i] % 10);
-		ghost_imei2_buf[8 + i] = '0' + (rand_snr2[i] % 10);
-	}
-
-	for (i = 0; i < 14; i++) {
-		val = ghost_imei_buf[i] - '0';
-		sum += (i & 1) ? luhn_doubled[val] : val;
-
-		val2 = ghost_imei2_buf[i] - '0';
-		sum2 += (i & 1) ? luhn_doubled[val2] : val2;
-	}
-
-	ghost_imei_buf[14] = '0' + ((10 - (sum % 10)) % 10);
-	ghost_imei_buf[15] = '\0';
-	ghost_build_imei_bcd_generic(ghost_imei_buf, ghost_imei_bcd_buf);
-
-	ghost_imei2_buf[14] = '0' + ((10 - (sum2 % 10)) % 10);
-	ghost_imei2_buf[15] = '\0';
-	ghost_build_imei_bcd_generic(ghost_imei2_buf, ghost_imei2_bcd_buf);
-
-	ghost_imei_ready = true;
-}
-
-const char *ghost_get_imei(void)
-{
-	mutex_lock(&ghost_imei_mutex);
-	if (unlikely(!ghost_imei_ready))
-		ghost_generate_g991b_imei();
-	mutex_unlock(&ghost_imei_mutex);
-	return ghost_imei_buf;
-}
-EXPORT_SYMBOL(ghost_get_imei);
-
-const char *ghost_get_imei2(void)
-{
-	mutex_lock(&ghost_imei_mutex);
-	if (unlikely(!ghost_imei_ready))
-		ghost_generate_g991b_imei();
-	mutex_unlock(&ghost_imei_mutex);
-	return ghost_imei2_buf;
-}
-EXPORT_SYMBOL(ghost_get_imei2);
-
-void ghost_get_imei_bcd(u8 out_bcd[8])
-{
-	mutex_lock(&ghost_imei_mutex);
-	if (unlikely(!ghost_imei_ready))
-		ghost_generate_g991b_imei();
-	memcpy(out_bcd, ghost_imei_bcd_buf, 8);
-	mutex_unlock(&ghost_imei_mutex);
-}
-EXPORT_SYMBOL(ghost_get_imei_bcd);
-
-void ghost_get_imei2_bcd(u8 out_bcd[8])
-{
-	mutex_lock(&ghost_imei_mutex);
-	if (unlikely(!ghost_imei_ready))
-		ghost_generate_g991b_imei();
-	memcpy(out_bcd, ghost_imei2_bcd_buf, 8);
-	mutex_unlock(&ghost_imei_mutex);
-}
-EXPORT_SYMBOL(ghost_get_imei2_bcd);
-
-void ghost_reroll_imei(void)
-{
-	mutex_lock(&ghost_imei_mutex);
-	ghost_generate_g991b_imei();
-	mutex_unlock(&ghost_imei_mutex);
-	pr_debug("ghost_imei [SM-G991B]: rerolled IMEI1 %s, IMEI2 %s\n", ghost_imei_buf, ghost_imei2_buf);
-}
-EXPORT_SYMBOL(ghost_reroll_imei);
-
-static int ghost_imei_show(struct seq_file *m, void *v)
-{
-	seq_printf(m, "imei1: %s\n", ghost_imei_buf);
-	seq_printf(m, "imei2: %s\n", ghost_imei2_buf);
-	return 0;
-}
-
-static int __init ghost_imei_proc_init(void)
-{
-	if (!ghost_imei_ready)
-		ghost_generate_g991b_imei();
-	if (!proc_create_single("ghost_imei", 0400, NULL, ghost_imei_show)) {
-		pr_err("ghost_imei: proc entry creation failed\n");
-		return -ENOMEM;
-	}
-	return 0;
-}
-late_initcall(ghost_imei_proc_init);
-/* === END GHOST IMEI === */
-
-#define GHOST_UPTIME_MIN_SLEEP_PCT	68ULL
-#define GHOST_UPTIME_MAX_SLEEP_PCT	82ULL
-#define GHOST_UPTIME_RANGE_SLEEP_PCT	(GHOST_UPTIME_MAX_SLEEP_PCT - GHOST_UPTIME_MIN_SLEEP_PCT + 1ULL)
-
 u64 ghost_uptime_offset_ns __read_mostly;
 EXPORT_SYMBOL_GPL(ghost_uptime_offset_ns);
 
-u64 ghost_uptime_mono_offset_ns __read_mostly;
-EXPORT_SYMBOL_GPL(ghost_uptime_mono_offset_ns);
-
-u64 ghost_uptime_sleep_offset_ns __read_mostly;
-EXPORT_SYMBOL_GPL(ghost_uptime_sleep_offset_ns);
-
-static u32 ghost_uptime_sleep_ratio_pct __read_mostly;
 static bool ghost_uptime_ready __read_mostly;
 
 enum ghost_realtime_mode {
@@ -293,43 +137,20 @@ static u64 ghost_uptime_make_offset_secs(time64_t wall_sec)
 }
 
 void ghost_uptime_apply_boot_offset(struct timespec64 *boot_offset,
-				    struct timespec64 *sleep_offset,
 				    time64_t wall_sec)
 {
-	u64 offset_secs, sleep_secs, mono_secs;
-	u64 seed;
+	u64 offset_secs;
 
-	if (!boot_offset || !sleep_offset || ghost_uptime_ready)
+	if (!boot_offset || ghost_uptime_ready)
 		return;
 
 	offset_secs = ghost_uptime_make_offset_secs(wall_sec);
-
-	/* Derive sleep ratio percentage (68% .. 82%) using secondary mix */
-	seed = ghost_uptime_mix64(ghost_uptime_read_counter() ^ (u64)wall_sec ^ offset_secs);
-	ghost_uptime_sleep_ratio_pct = GHOST_UPTIME_MIN_SLEEP_PCT +
-		(seed % GHOST_UPTIME_RANGE_SLEEP_PCT);
-
-	sleep_secs = div64_u64(offset_secs * (u64)ghost_uptime_sleep_ratio_pct, 100ULL);
-	mono_secs = offset_secs - sleep_secs;
-
-	/*
-	 * Mono offset shifts CLOCK_MONOTONIC (CPU awake time),
-	 * Sleep offset shifts CLOCK_BOOTTIME via tk->offs_boot (deep sleep time).
-	 * Total Uptime = Mono Offset + Sleep Offset = offset_secs (15..25 days).
-	 * Preserve original boot_offset->tv_nsec for natural appearance.
-	 */
-	boot_offset->tv_sec += mono_secs;
-
-	sleep_offset->tv_sec = sleep_secs;
-	sleep_offset->tv_nsec = 0;
-
+	boot_offset->tv_sec += offset_secs;
 	ghost_uptime_offset_ns = offset_secs * NSEC_PER_SEC;
-	ghost_uptime_mono_offset_ns = mono_secs * NSEC_PER_SEC;
-	ghost_uptime_sleep_offset_ns = sleep_secs * NSEC_PER_SEC;
 	ghost_uptime_ready = true;
 
-	pr_info("ghost_uptime: schema=v3 mode=session total_secs=%llu mono_secs=%llu sleep_secs=%llu sleep_pct=%u%%\n",
-		offset_secs, mono_secs, sleep_secs, ghost_uptime_sleep_ratio_pct);
+	pr_info("ghost_uptime: schema=v2 mode=session offset_secs=%llu range_days=15..25\n",
+		offset_secs);
 }
 
 void ghost_uptime_apply_realtime(struct timespec64 *wall_time)
@@ -417,16 +238,11 @@ EXPORT_SYMBOL_GPL(ghost_uptime_audit_timekeeping_inject_offset);
 static int ghost_uptime_proc_show(struct seq_file *m, void *v)
 {
 	u64 offset_secs = div64_u64(ghost_uptime_offset_ns, NSEC_PER_SEC);
-	u64 mono_secs = div64_u64(ghost_uptime_mono_offset_ns, NSEC_PER_SEC);
-	u64 sleep_secs = div64_u64(ghost_uptime_sleep_offset_ns, NSEC_PER_SEC);
 
 	seq_printf(m,
-		   "schema=v8\n"
+		   "schema=v7\n"
 		   "mode=session\n"
 		   "offset_secs=%llu\n"
-		   "mono_offset_secs=%llu\n"
-		   "sleep_offset_secs=%llu\n"
-		   "sleep_ratio_pct=%u\n"
 		   "range_days=15..25\n"
 		   "ready=%u\n"
 		   "time_surface_audit_schema=v4\n"
@@ -460,9 +276,7 @@ static int ghost_uptime_proc_show(struct seq_file *m, void *v)
 		   "persist_partition=absent\n"
 		   "data_root_stat_seen=%u\n"
 		   "metadata_root_stat_seen=%u\n",
-		   offset_secs, mono_secs, sleep_secs,
-		   ghost_uptime_sleep_ratio_pct,
-		   ghost_uptime_ready ? 1 : 0,
+		   offset_secs, ghost_uptime_ready ? 1 : 0,
 		   ghost_realtime_mode_name(ghost_realtime_mode),
 		   ghost_realtime_cmdline_seen ? "cmdline" :
 			"compiletime-default",
@@ -496,14 +310,10 @@ unsigned long long ghost_uptime_apply_proc_start_time(
 {
 	u64 offset_ticks;
 
-	if (!task || !ghost_uptime_mono_offset_ns)
+	if (!task || !ghost_uptime_offset_ns)
 		return start_time;
 
-	/*
-	 * /proc/[pid]/stat starttime is relative to CLOCK_MONOTONIC epoch,
-	 * so use mono offset (CPU awake time) not total boottime offset.
-	 */
-	offset_ticks = nsec_to_clock_t(ghost_uptime_mono_offset_ns);
+	offset_ticks = nsec_to_clock_t(ghost_uptime_offset_ns);
 	if (start_time > offset_ticks)
 		return start_time - offset_ticks;
 
@@ -586,3 +396,273 @@ void ghost_uptime_apply_stat(struct inode *inode, struct kstat *stat)
 	set_bit(partition_bit, &ghost_uptime_partition_seen);
 }
 EXPORT_SYMBOL_GPL(ghost_uptime_apply_stat);
+
+static void *ghost_memmem(const void *haystack, size_t haystacklen,
+			  const void *needle, size_t needlelen)
+{
+	const char *h = haystack;
+	const char *n = needle;
+	size_t i;
+
+	if (!haystack || !needle || needlelen == 0 || haystacklen < needlelen)
+		return NULL;
+
+	for (i = 0; i <= haystacklen - needlelen; i++) {
+		if (h[i] == n[0] && !memcmp(&h[i], needle, needlelen))
+			return (void *)&h[i];
+	}
+	return NULL;
+}
+
+static bool ghost_replace_string(char *buf, size_t count, const char *search, const char *replace, size_t len)
+{
+	char *p = buf;
+	bool found = false;
+
+	while (p <= buf + count - len) {
+		p = ghost_memmem(p, buf + count - p, search, len);
+		if (!p)
+			break;
+		memcpy(p, replace, len);
+		found = true;
+		p += len;
+	}
+	return found;
+}
+
+static void ghost_shift_date_str(char *p, u64 offset_secs)
+{
+	int y, m, d, h, min, s;
+	time64_t epoch;
+	struct tm tm;
+	char tmp[24];
+
+	if (sscanf(p, "%4d-%2d-%2d-%2d-%2d-%2d", &y, &m, &d, &h, &min, &s) != 6)
+		return;
+
+	if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31)
+		return;
+
+	epoch = mktime64(y, m, d, h, min, s);
+	if (epoch <= (time64_t)offset_secs)
+		return;
+
+	time64_to_tm(epoch - offset_secs, 0, &tm);
+	snprintf(tmp, sizeof(tmp), "%04ld-%02d-%02d-%02d-%02d-%02d",
+		 (long)tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		 tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+	memcpy(p, tmp, 19);
+}
+
+bool ghost_sanitize_batterystats_dump(char *buf, size_t *count_ptr, size_t max_count)
+{
+	u64 offset_secs;
+	char *p;
+	bool modified = false;
+
+	if (!buf || !count_ptr || *count_ptr < 16)
+		return false;
+
+	offset_secs = div64_u64(ghost_uptime_offset_ns, NSEC_PER_SEC);
+	if (!offset_secs)
+		return false;
+
+	/* 1. Start clock time: YYYY-MM-DD-HH-mm-ss */
+	p = buf;
+	while (p < buf + *count_ptr - 37) {
+		p = ghost_memmem(p, buf + *count_ptr - p, "Start clock time: ", 18);
+		if (!p)
+			break;
+		ghost_shift_date_str(p + 18, offset_secs);
+		modified = true;
+		p += 37;
+	}
+
+	/* 2. Current start time: YYYY-MM-DD-HH-mm-ss */
+	p = buf;
+	while (p < buf + *count_ptr - 39) {
+		p = ghost_memmem(p, buf + *count_ptr - p, "Current start time: ", 20);
+		if (!p)
+			break;
+		ghost_shift_date_str(p + 20, offset_secs);
+		modified = true;
+		p += 39;
+	}
+
+	/* 3. Any "TIME: 20XX-XX-XX-XX-XX-XX" in history (covers RESET:TIME: and (19) TIME:) */
+	p = buf;
+	while (p < buf + *count_ptr - 25) {
+		p = ghost_memmem(p, buf + *count_ptr - p, "TIME: 20", 8);
+		if (!p)
+			break;
+		ghost_shift_date_str(p + 6, offset_secs);
+		modified = true;
+		p += 25;
+	}
+
+	/* 4. Total run time: In-place exact length replacement (delta == 0) */
+	p = ghost_memmem(buf, *count_ptr, "Total run time: ", 16);
+	if (p) {
+		char *eol = memchr(p, '\n', buf + *count_ptr - p);
+		if (eol) {
+			size_t old_len = eol - p;
+			struct timespec64 uptime;
+			u64 total_real_sec;
+			u64 total_awake_sec;
+			u64 r_days, u_days;
+			u32 r_rem, u_rem, r_hours, u_hours, r_mins, u_mins, r_secs, u_secs;
+			char new_line[128];
+			int new_len;
+
+			ktime_get_boottime_ts64(&uptime);
+			total_real_sec = uptime.tv_sec;
+			total_awake_sec = div64_u64(total_real_sec * 27, 100);
+
+			r_days = div64_u64(total_real_sec, 86400);
+			r_rem = total_real_sec % 86400;
+			r_hours = r_rem / 3600;
+			r_rem %= 3600;
+			r_mins = r_rem / 60;
+			r_secs = r_rem % 60;
+
+			u_days = div64_u64(total_awake_sec, 86400);
+			u_rem = total_awake_sec % 86400;
+			u_hours = u_rem / 3600;
+			u_rem %= 3600;
+			u_mins = u_rem / 60;
+			u_secs = u_rem % 60;
+
+			new_len = snprintf(new_line, sizeof(new_line),
+				"Total run time: %llud %uh %um %us realtime, %llud %uh %um %us uptime",
+				r_days, r_hours, r_mins, r_secs,
+				u_days, u_hours, u_mins, u_secs);
+
+			if (new_len > (int)old_len) {
+				new_len = snprintf(new_line, sizeof(new_line),
+					"Total run time: %llud %uh %um realtime, %llud %uh %um uptime",
+					r_days, r_hours, r_mins,
+					u_days, u_hours, u_mins);
+			}
+
+			if (new_len > (int)old_len) {
+				new_len = snprintf(new_line, sizeof(new_line),
+					"Total run time: %llud %uh realtime, %llud %uh uptime",
+					r_days, r_hours,
+					u_days, u_hours);
+			}
+
+			if (new_len <= (int)old_len) {
+				memcpy(p, new_line, new_len);
+				if (old_len > new_len)
+					memset(p + new_len, ' ', old_len - new_len);
+				modified = true;
+			}
+		}
+	}
+
+	/* 5. Pure Kernel In-place zero-delta framework sanitization */
+	if (ghost_replace_string(buf, *count_ptr, "type=DEVICE_STARTUP", "type=NONE          ", 19))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "type=DEVICE_SHUTDOWN", "type=NONE           ", 20))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "due to SYSTEM_BOOT", "due to USER_ACTION", 18))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "ams_boot_progress", "ams_data_progress", 17))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "action.BOOT_COMPLETED", "action.LOCALE_CHANGED", 21))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "Subject: BootReceiver", "Subject: StatReceiver", 21))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "event_log_start", "event_log_entry", 15))
+		modified = true;
+
+	/* 6. Telephony in-service sanitization for dumpsys telephony.registry */
+	if (ghost_replace_string(buf, *count_ptr, "mVoiceRegState=1(OUT_OF_SERVICE)", "mVoiceRegState=0(IN_SERVICE)    ", 32))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "mDataRegState=1(OUT_OF_SERVICE)", "mDataRegState=0(IN_SERVICE)    ", 31))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "registrationState=NOT_REG_OR_SEARCHING", "registrationState=HOME_NETWORK        ", 38))
+		modified = true;
+	if (ghost_replace_string(buf, *count_ptr, "MobileData=OUT_OF_SERVICE", "MobileData=IN_SERVICE    ", 25))
+		modified = true;
+
+	return modified;
+}
+EXPORT_SYMBOL_GPL(ghost_sanitize_batterystats_dump);
+
+void ghost_sanitize_persistent_properties(char *buf, size_t count)
+{
+	char *p;
+	struct timespec64 boottime;
+	char anchor_str[16];
+	size_t anchor_len;
+
+	if (!buf || count < 24)
+		return;
+
+	getboottime64(&boottime);
+	if (boottime.tv_sec < 1000000000ULL)
+		return;
+
+	anchor_len = snprintf(anchor_str, sizeof(anchor_str), "%llu",
+			      (unsigned long long)(boottime.tv_sec + 90));
+
+	/* 1. Replace "reboot,factory_reset" with "reboot              " */
+	p = buf;
+	while (p < buf + count - 20) {
+		p = ghost_memmem(p, buf + count - p, "reboot,factory_reset", 20);
+		if (!p)
+			break;
+		memcpy(p, "reboot              ", 20);
+		p += 20;
+	}
+
+	/* 2. Replace any remaining "factory_reset" with "reboot       " */
+	p = buf;
+	while (p < buf + count - 13) {
+		p = ghost_memmem(p, buf + count - p, "factory_reset", 13);
+		if (!p)
+			break;
+		memcpy(p, "reboot       ", 13);
+		p += 13;
+	}
+
+	/* 3. Replace any "recovery" in boot reason with "reboot  " */
+	p = buf;
+	while (p < buf + count - 8) {
+		p = ghost_memmem(p, buf + count - p, "recovery", 8);
+		if (!p)
+			break;
+		memcpy(p, "reboot  ", 8);
+		p += 8;
+	}
+
+	/* 4. Find persist.sys.boot.reason.history and align timestamp to btime */
+	p = ghost_memmem(buf, count, "persist.sys.boot.reason.history", 31);
+	if (p && anchor_len == 10) {
+		char *end = buf + count;
+		char *val = p + 31;
+		char *scan_end = (val + 300 < end) ? val + 300 : end;
+		while (val < scan_end - 10) {
+			if (val[0] == '1' && val[1] == '7' &&
+			    (val[2] >= '6' && val[2] <= '9')) {
+				bool is_all_digits = true;
+				int i;
+				for (i = 0; i < 10; i++) {
+					if (val[i] < '0' || val[i] > '9') {
+						is_all_digits = false;
+						break;
+					}
+				}
+				if (is_all_digits) {
+					memcpy(val, anchor_str, 10);
+					val += 10;
+					continue;
+				}
+			}
+			val++;
+		}
+	}
+}
+EXPORT_SYMBOL_GPL(ghost_sanitize_persistent_properties);

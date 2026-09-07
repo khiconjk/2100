@@ -20,7 +20,9 @@
 #include <linux/sys_soc.h>
 #include <linux/soc/samsung/exynos-soc.h>
 #include <linux/module.h>
-#include <linux/ghost_storage.h>
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 struct exynos_chipid_info exynos_soc_info;
 EXPORT_SYMBOL(exynos_soc_info);
@@ -232,19 +234,24 @@ static ssize_t product_id_show(struct device *dev,
 static ssize_t unique_id_show(struct device *dev,
 			         struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, 20, "%010llX\n", (u64)ghost_storage_get_soc_unique_id());
+#if __has_include(<linux/ghost_config.h>)
+	u64 gid = ghost_get_active_unique_id();
+	if (gid)
+		return snprintf(buf, 20, "%016llX\n", gid);
+#endif
+	return snprintf(buf, 20, "%010LX\n", exynos_soc_info.unique_id);
 }
 
 static ssize_t lot_id_show(struct device *dev,
 			         struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, 14, "%08X\n", ghost_storage_get_soc_lot_id());
+	return snprintf(buf, 14, "%08X\n", exynos_soc_info.lot_id);
 }
 
 static ssize_t lot_id2_show(struct device *dev,
 			         struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, 14, "%s\n", ghost_storage_get_soc_lot_id2());
+	return snprintf(buf, 14, "%s\n", exynos_soc_info.lot_id2);
 }
 
 static ssize_t revision_show(struct device *dev,
@@ -332,7 +339,7 @@ static int sysfs_create_svc_ap(void)
 		pr_err("No exynos_soc kobject\n");
 		return -ENODEV;
 	}
-		
+
 	svc_sd = sysfs_get_dirent(top_kobj->sd, "svc");
 	if (IS_ERR_OR_NULL(svc_sd)) {
 		/* try to create svc kobject */
@@ -421,15 +428,17 @@ static void exynos_chipid_get_chipid_info(void)
 
 	val = __raw_readl(exynos_soc_info.reg + data->unique_id_reg);
 	val |= (u64)__raw_readl(exynos_soc_info.reg + data->unique_id_reg + 4) << 32UL;
-	exynos_soc_info.unique_id  = ghost_storage_get_soc_unique_id();
-	exynos_soc_info.lot_id = ghost_storage_get_soc_lot_id();
+#if __has_include(<linux/ghost_config.h>)
+	if (ghost_get_active_unique_id())
+		val = ghost_get_active_unique_id();
+#endif
+	exynos_soc_info.unique_id  = val;
+	exynos_soc_info.lot_id = val & EXYNOS_LOTID_MASK;
 
-	temp = __raw_readl(exynos_soc_info.reg + data->unique_id_reg);
+	temp = (u32)(val & 0xFFFFFFFF);
 	temp = chipid_reverse_value(temp, 32);
 	temp = (temp >> 11) & EXYNOS_LOTID_MASK;
 	chipid_dec_to_36(temp, lot_id);
-	strncpy(lot_id, ghost_storage_get_soc_lot_id2(), sizeof(lot_id) - 1);
-	lot_id[sizeof(lot_id) - 1] = '\0';
 	exynos_soc_info.lot_id2 = lot_id;
 }
 
@@ -483,10 +492,9 @@ static int exynos_chipid_probe(struct platform_device *pdev)
 		goto free_soc;
 
 	soc_dev_attr->soc_id = product_id_to_name(exynos_soc_info.product_id);
-	soc_dev_attr->serial_number = kasprintf(GFP_KERNEL, "%010llX", exynos_soc_info.unique_id);
 	soc_dev = soc_device_register(soc_dev_attr);
 	if (IS_ERR(soc_dev))
-		goto free_serial;
+		goto free_rev;
 
 //	dev_set_socdata(&pdev->dev, "Exynos", "ChipID");
 	dev_info(&pdev->dev, "CPU[%s] CPU_REV[0x%x] Detected\n",
@@ -496,8 +504,6 @@ static int exynos_chipid_probe(struct platform_device *pdev)
 
 	chipid_sysfs_init();
 	return 0;
-free_serial:
-	kfree(soc_dev_attr->serial_number);
 free_rev:
 	kfree(soc_dev_attr->revision);
 free_soc:

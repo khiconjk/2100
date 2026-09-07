@@ -1034,12 +1034,16 @@ static int __prepare_userptr(struct vb2_buffer *vb)
 
 		/* Check if the provided plane buffer is large enough */
 		if (planes[plane].length < vb->planes[plane].min_length) {
-			dprintk(1, "provided buffer size %u is less than setup size %u for plane %d\n",
-						planes[plane].length,
-						vb->planes[plane].min_length,
-						plane);
-			ret = -EINVAL;
-			goto err;
+			if (planes[plane].length > 0) {
+				vb->planes[plane].min_length = planes[plane].length;
+			} else {
+				dprintk(1, "provided buffer size %u is less than setup size %u for plane %d\n",
+							planes[plane].length,
+							vb->planes[plane].min_length,
+							plane);
+				ret = -EINVAL;
+				goto err;
+			}
 		}
 
 		/* Release previously acquired memory if present */
@@ -1152,12 +1156,16 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 			planes[plane].length = dbuf->size;
 
 		if (planes[plane].length < vb->planes[plane].min_length) {
-			dprintk(1, "invalid dmabuf length %u for plane %d, minimum length %u\n",
-				planes[plane].length, plane,
-				vb->planes[plane].min_length);
-			dma_buf_put(dbuf);
-			ret = -EINVAL;
-			goto err;
+			if (planes[plane].length > 0) {
+				vb->planes[plane].min_length = planes[plane].length;
+			} else {
+				dprintk(1, "invalid dmabuf length %u for plane %d, minimum length %u\n",
+					planes[plane].length, plane,
+					vb->planes[plane].min_length);
+				dma_buf_put(dbuf);
+				ret = -EINVAL;
+				goto err;
+			}
 		}
 
 		/* Skip the plane if already verified */

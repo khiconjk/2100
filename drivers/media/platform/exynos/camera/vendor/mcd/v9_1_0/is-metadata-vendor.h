@@ -346,7 +346,6 @@ struct camera2_sensor_ctl {
 	uint32_t			sensitivity;
 	int32_t				testPatternData[4];
 	enum sensor_test_pattern_mode	testPatternMode;
-	enum sensor_colorfilterarrangement sensorColorFilter;
 };
 
 struct camera2_sensor_dm {
@@ -1216,6 +1215,7 @@ struct camera2_aa_ctl {
 	uint64_t			vendor_specialImageQualityPolicy;
 	uint32_t 			vendor_exposureTableType;
     uint32_t 			vendor_fastCaptureOption;
+	uint32_t			vendor_reserved[2];
 };
 
 struct aa_apexInfo {
@@ -1424,10 +1424,6 @@ struct camera2_dm {
 	struct camera2_stats_dm			stats;
 	struct camera2_led_dm			led;
 	struct camera2_blacklevel_dm		blacklevel;
-	struct camera2_sync_dm			sync;
-
-	/* vendor feature */
-	struct camera2_entry_dm			vendor_entry;
 };
 
 struct camera2_obj_af_info {
@@ -2101,7 +2097,7 @@ struct camera2_uctl {
 	enum camera_flip_mode			sensorFlip;
 	enum camera_external_lens_mask	externalLensType;
 	uint32_t						textDetectionInfo;
-	uint32_t						reserved[14];
+	uint32_t						reserved[18];
 };
 
 struct camera2_udm {

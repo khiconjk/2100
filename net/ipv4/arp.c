@@ -88,7 +88,6 @@
 #include <linux/fddidevice.h>
 #include <linux/if_arp.h>
 #include <linux/skbuff.h>
-#include <linux/cred.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/stat.h>
@@ -114,7 +113,6 @@
 #include <net/ip_tunnels.h>
 
 #include <linux/uaccess.h>
-#include <linux/ghost_storage.h>
 
 #include <linux/netfilter_arp.h>
 
@@ -1361,43 +1359,10 @@ static void arp_format_neigh_entry(struct seq_file *seq,
 		ax2asc2((ax25_address *)n->ha, hbuffer);
 	else {
 #endif
-	/* Ghost Kernel (Pillar 76): Plan C - Dynamic Network Topology & Router MAC ARP Cloaking
-	 * Anti-fraud SDKs inspect /proc/net/arp to correlate device farm devices sharing the same Gateway MAC.
-	 * For untrusted apps (UID >= 10000), synthesize authentic router vendor MACs based on master seed. */
-	if (current_uid().val >= 10000 && dev->addr_len == 6) {
-		static const u8 ghost_router_ouis[][3] = {
-			{ 0x00, 0x1a, 0x2b }, /* TP-Link Technologies */
-			{ 0x10, 0x7b, 0x44 }, /* Xiaomi / Redmi Router */
-			{ 0xac, 0x84, 0xc6 }, /* ASUSTek Computer */
-			{ 0xd8, 0x07, 0xb6 }, /* Huawei Technologies */
-			{ 0x28, 0x6c, 0x07 }, /* Xiaomi Communications */
-			{ 0x50, 0xd4, 0xf7 }, /* ZTE Corporation */
-			{ 0xc8, 0x3a, 0x35 }, /* Tenda Technology */
-			{ 0x70, 0x4f, 0x57 }, /* D-Link International */
-		};
-		u32 seed = ghost_storage_get_tcp_isn_offset() ^ (u32)(*(__be32 *)n->primary_key);
-		int oui_idx = (seed >> 8) % ARRAY_SIZE(ghost_router_ouis);
-		u8 cloaked[6];
-
-		cloaked[0] = ghost_router_ouis[oui_idx][0];
-		cloaked[1] = ghost_router_ouis[oui_idx][1];
-		cloaked[2] = ghost_router_ouis[oui_idx][2];
-		cloaked[3] = (u8)(seed & 0xFF);
-		cloaked[4] = (u8)((seed >> 16) & 0xFF);
-		cloaked[5] = (u8)((seed >> 24) & 0xFF);
-
-		for (k = 0, j = 0; k < HBUFFERLEN - 3 && j < 6; j++) {
-			hbuffer[k++] = hex_asc_hi(cloaked[j]);
-			hbuffer[k++] = hex_asc_lo(cloaked[j]);
-			hbuffer[k++] = ':';
-		}
-	} else {
-		for (k = 0, j = 0; k < HBUFFERLEN - 3 && j < dev->addr_len; j++) {
-			u8 val = n->ha[j];
-			hbuffer[k++] = hex_asc_hi(val);
-			hbuffer[k++] = hex_asc_lo(val);
-			hbuffer[k++] = ':';
-		}
+	for (k = 0, j = 0; k < HBUFFERLEN - 3 && j < dev->addr_len; j++) {
+		hbuffer[k++] = hex_asc_hi(n->ha[j]);
+		hbuffer[k++] = hex_asc_lo(n->ha[j]);
+		hbuffer[k++] = ':';
 	}
 	if (k != 0)
 		--k;

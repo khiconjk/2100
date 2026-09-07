@@ -25,7 +25,6 @@
 
 #include "scsi_priv.h"
 #include "scsi_logging.h"
-#include <linux/ghost_storage.h>
 
 static struct device_type scsi_dev_type;
 
@@ -651,52 +650,40 @@ static int scsi_sdev_check_buf_bit(const char *buf)
  */
 sdev_rd_attr (type, "%d\n");
 sdev_rd_attr (scsi_level, "%d\n");
-sdev_rd_attr (vendor, "%.8s\n");
 
-static ssize_t sdev_show_model(struct device *dev,
-			       struct device_attribute *attr, char *buf)
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
+
+static ssize_t
+sdev_show_vendor (struct device *dev, struct device_attribute *attr,
+		   char *buf)
+{
+	const char *v = "SAMSUNG ";
+	return snprintf (buf, 20, "%.8s\n", v);
+}
+static DEVICE_ATTR(vendor, S_IRUGO, sdev_show_vendor, NULL);
+
+static ssize_t
+sdev_show_model (struct device *dev, struct device_attribute *attr,
+		   char *buf)
 {
 	char model[32];
-	ghost_storage_get_ufs_model(model, sizeof(model));
-	return snprintf(buf, PAGE_SIZE, "%s\n", model);
+	strscpy(model, "KLUDG8UHDB-C2D1 ", sizeof(model));
+#if __has_include(<linux/ghost_config.h>)
+	ghost_get_ufs_model_buf(model, sizeof(model));
+#endif
+	return snprintf (buf, 20, "%.16s\n", model);
 }
 static DEVICE_ATTR(model, S_IRUGO, sdev_show_model, NULL);
 
-static ssize_t sdev_show_rev(struct device *dev,
-			     struct device_attribute *attr, char *buf)
+static ssize_t
+sdev_show_rev (struct device *dev, struct device_attribute *attr,
+		   char *buf)
 {
-	char rev[8];
-	ghost_storage_get_ufs_rev(rev, sizeof(rev));
-	return snprintf(buf, PAGE_SIZE, "%s\n", rev);
+	return snprintf (buf, 20, "%.4s\n", "0100");
 }
 static DEVICE_ATTR(rev, S_IRUGO, sdev_show_rev, NULL);
-
-static ssize_t sdev_show_serial(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	char sn[GHOST_UFS_SN_LEN + 1];
-	ghost_storage_get_ufs_sn(sn, sizeof(sn));
-	return snprintf(buf, PAGE_SIZE, "%s\n", sn);
-}
-static DEVICE_ATTR(serial, S_IRUGO, sdev_show_serial, NULL);
-
-static ssize_t sdev_show_cid(struct device *dev,
-			     struct device_attribute *attr, char *buf)
-{
-	char cid[GHOST_UFS_CID_LEN + 1];
-	ghost_storage_get_ufs_cid(cid, sizeof(cid));
-	return snprintf(buf, PAGE_SIZE, "%s\n", cid);
-}
-static DEVICE_ATTR(cid, S_IRUGO, sdev_show_cid, NULL);
-
-static ssize_t sdev_show_manfid(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	char manfid[16];
-	ghost_storage_get_ufs_manfid(manfid, sizeof(manfid));
-	return snprintf(buf, PAGE_SIZE, "%s\n", manfid);
-}
-static DEVICE_ATTR(manfid, S_IRUGO, sdev_show_manfid, NULL);
 
 static ssize_t
 sdev_show_device_busy(struct device *dev, struct device_attribute *attr,
@@ -942,33 +929,7 @@ static struct bin_attribute dev_attr_vpd_##_page = {		\
 };
 
 sdev_vpd_pg_attr(pg83);
-
-static ssize_t
-show_vpd_pg80(struct file *filp, struct kobject *kobj,
-	      struct bin_attribute *bin_attr,
-	      char *buf, loff_t off, size_t count)
-{
-	struct device *dev = container_of(kobj, struct device, kobj);
-	struct scsi_device *sdev = to_scsi_device(dev);
-	struct scsi_vpd *vpd_page;
-	int ret = -EINVAL;
-
-	rcu_read_lock();
-	vpd_page = rcu_dereference(sdev->vpd_pg80);
-	if (vpd_page) {
-		ret = memory_read_from_buffer(buf, count, &off,
-					      vpd_page->data, vpd_page->len);
-		if (ret > 0)
-			ghost_storage_filter_vpd_pg80((u8 *)buf, (size_t)ret);
-	}
-	rcu_read_unlock();
-	return ret;
-}
-static struct bin_attribute dev_attr_vpd_pg80 = {
-	.attr = {.name = "vpd_pg80", .mode = S_IRUGO },
-	.size = 0,
-	.read = show_vpd_pg80,
-};
+sdev_vpd_pg_attr(pg80);
 
 static ssize_t show_inquiry(struct file *filep, struct kobject *kobj,
 			    struct bin_attribute *bin_attr,
@@ -1099,13 +1060,8 @@ static ssize_t
 sdev_show_wwid(struct device *dev, struct device_attribute *attr,
 		    char *buf)
 {
-	char ghost_wwid[32] = {0};
 	struct scsi_device *sdev = to_scsi_device(dev);
 	ssize_t count;
-
-	ghost_storage_get_scsi_wwid(ghost_wwid, sizeof(ghost_wwid));
-	if (ghost_wwid[0])
-		return snprintf(buf, PAGE_SIZE, "%s\n", ghost_wwid);
 
 	count = scsi_vpd_lun_id(sdev, buf, PAGE_SIZE);
 	if (count > 0) {
@@ -1324,9 +1280,6 @@ static struct attribute *scsi_sdev_attrs[] = {
 	&dev_attr_vendor.attr,
 	&dev_attr_model.attr,
 	&dev_attr_rev.attr,
-	&dev_attr_serial.attr,
-	&dev_attr_cid.attr,
-	&dev_attr_manfid.attr,
 	&dev_attr_rescan.attr,
 	&dev_attr_delete.attr,
 	&dev_attr_state.attr,

@@ -89,7 +89,6 @@
 #include <linux/slab.h>
 #include "check.h"
 #include "efi.h"
-#include <linux/ghost_storage.h>
 
 /* This allows a kernel command line option 'gpt' to override
  * the test for invalid PMBR.  Not __initdata because reloading
@@ -710,7 +709,6 @@ int efi_partition(struct parsed_partitions *state)
 
 		info = &state->parts[i + 1].info;
 		efi_guid_to_str(&ptes[i].unique_partition_guid, info->uuid);
-		ghost_storage_filter_part_uuid(info->uuid, info->uuid);
 
 		/* Naively convert UTF16-LE to 7 bits. */
 		label_max = min(ARRAY_SIZE(info->volname) - 1,

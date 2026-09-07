@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/of.h>
 #include <linux/slab.h>
-#include <linux/string.h>
-#include <linux/ghost_net.h>
+#include <linux/ghost_config.h>
 
 #include "of_private.h"
 
@@ -35,94 +34,10 @@ static ssize_t of_node_property_read(struct file *filp, struct kobject *kobj,
 				loff_t offset, size_t count)
 {
 	struct property *pp = container_of(bin_attr, struct property, attr);
-	const void *val = pp->value;
-	size_t len = pp->length;
-	ssize_t ret;
+	ssize_t ret = memory_read_from_buffer(buf, count, &offset, pp->value, pp->length);
 
-	if (pp->name) {
-		if (!strcmp(pp->name, "verifiedbootstate")) {
-			val = "green\0";
-			len = 6;
-		} else if (!strcmp(pp->name, "device_state")) {
-			val = "locked\0";
-			len = 7;
-		} else if (!strcmp(pp->name, "warranty_bit")) {
-			val = "0\0";
-			len = 2;
-		} else if (!strcmp(pp->name, "serial-number") || !strcmp(pp->name, "serialno")) {
-			if (!ghost_serialno_ready)
-				ghost_init_serialno();
-			val = ghost_serialno;
-			len = strlen(ghost_serialno) + 1;
-		}
-	}
-	ret = memory_read_from_buffer(buf, count, &offset, val, len);
-
-	if (ret > 0 && pp->name && (!strcmp(pp->name, "bootargs") || !strcmp(pp->name, "bootargs_ext"))) {
-		char *p;
-		char *end = buf + ret;
-
-		/* 1. verifiedbootstate: orange/yellow -> green  */
-		p = buf;
-		while (p < end && (p = strstr(p, "androidboot.verifiedbootstate=orange"))) {
-			if (p + 36 <= end)
-				memcpy(p + 30, "green ", 6);
-			p += 36;
-		}
-		p = buf;
-		while (p < end && (p = strstr(p, "androidboot.verifiedbootstate=yellow"))) {
-			if (p + 36 <= end)
-				memcpy(p + 30, "green ", 6);
-			p += 36;
-		}
-		p = buf;
-		while (p < end && (p = strstr(p, "androidboot.verifiedbootstate=red"))) {
-			if (p + 33 <= end)
-				memcpy(p + 30, "grn", 3);
-			p += 33;
-		}
-
-		/* 2. warranty_bit: 1 -> 0 */
-		p = buf;
-		while (p < end && (p = strstr(p, "androidboot.warranty_bit=1"))) {
-			*(p + 25) = '0';
-			p += 26;
-		}
-
-		/* 3. flash.locked: 0 -> 1 */
-		p = buf;
-		while (p < end && (p = strstr(p, "androidboot.flash.locked=0"))) {
-			*(p + 25) = '1';
-			p += 26;
-		}
-
-		/* 4. vbmeta.device_state: unlocked -> locked   */
-		p = buf;
-		while (p < end && (p = strstr(p, "androidboot.vbmeta.device_state=unlocked"))) {
-			if (p + 40 <= end)
-				memcpy(p + 32, "locked  ", 8);
-			p += 40;
-		}
-
-		/* 5. serialno */
-		if (!ghost_serialno_ready)
-			ghost_init_serialno();
-		p = buf;
-		while (p < end && (p = strstr(p, "androidboot.serialno="))) {
-			if (p + 21 + 11 <= end) {
-				memcpy(p + 21, ghost_serialno, 11);
-			}
-			p += 32;
-		}
-
-		/* 6. ap_serial */
-		p = buf;
-		while (p < end && (p = strstr(p, "androidboot.ap_serial=0x8BF5CC45CC10"))) {
-			if (p + 36 <= end)
-				memcpy(p + 22, "0x100000000000", 14);
-			p += 36;
-		}
-	}
+	if (ret > 0 && pp->name && !strcmp(pp->name, "bootargs"))
+		ghost_sanitize_bootargs(buf, ret);
 
 	return ret;
 }

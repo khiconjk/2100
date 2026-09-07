@@ -19,10 +19,6 @@
 #ifdef CONFIG_HUGEPAGE_POOL
 #include <linux/hugepage_pool.h>
 #endif
-#include <linux/sched/clock.h>
-#include <linux/cred.h>
-#include <linux/ghost_uptime.h>
-#include <linux/ghost_storage.h>
 #include <asm/page.h>
 #include "internal.h"
 
@@ -49,13 +45,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	long hugepage_pool_pages = 0;
 
 	si_meminfo(&i);
-
-	/* Ghost Kernel (Pillar 31): Normalize total RAM to stock Samsung value */
-	{
-		long delta = ghost_storage_get_ram_delta_pages();
-		if (delta && i.totalram > (unsigned long)abs(delta))
-			i.totalram += delta;
-	}
 	si_swapinfo(&i);
 	committed = percpu_counter_read_positive(&vm_committed_as);
 
@@ -78,54 +67,12 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	sreclaimable = global_node_page_state(NR_SLAB_RECLAIMABLE);
 	sunreclaim = global_node_page_state(NR_SLAB_UNRECLAIMABLE);
 
-	/* Ghost Kernel (PLAN G): RAM Fragmentation & Realistic Multi-Week Memory State */
-	{
-		unsigned long fake_swapcached = total_swapcache_pages();
-
-		if (current_uid().val >= 10000 && ghost_uptime_offset_ns > 0) {
-			/* Calculate realistic aged cache/buffer expansion (e.g. 1.2 GB cache, 60 MB buffers) */
-			unsigned long fake_cache_pages = (1200UL * 1024 * 1024) >> PAGE_SHIFT;
-			unsigned long fake_buffer_pages = (60UL * 1024 * 1024) >> PAGE_SHIFT;
-
-			if (i.freeram > (fake_cache_pages + fake_buffer_pages + ((500UL * 1024 * 1024) >> PAGE_SHIFT))) {
-				i.freeram -= (fake_cache_pages + fake_buffer_pages);
-				cached += fake_cache_pages;
-				i.bufferram += fake_buffer_pages;
-				if (available > (fake_cache_pages / 2))
-					available -= (fake_cache_pages / 3);
-			}
-
-			/* Simulate active ZRAM usage on aged device (35% - 55% swap allocated) */
-			if (i.totalswap > 0) {
-				u32 seed = ghost_storage_get_tcp_isn_offset();
-				unsigned long swap_used_pct = 35 + (seed % 20);
-				unsigned long used_swap = (i.totalswap * swap_used_pct) / 100;
-				i.freeswap = i.totalswap - used_swap;
-				fake_swapcached = used_swap / 6;
-			}
-		}
-
-		{
-			long ghost_mem_jitter = 0;
-			long free_val, avail_val;
-			if (ghost_storage_ready) {
-				u64 now_ns = sched_clock();
-				ghost_mem_jitter = (long)((now_ns >> 20) & 0x1F) - 16;
-			}
-			free_val = i.freeram + rbinfree + hugepage_pool_pages + ghost_mem_jitter;
-			avail_val = available + rbinfree + hugepage_pool_pages + ghost_mem_jitter;
-			if (free_val < 0)
-				free_val = 0;
-			if (avail_val < 0)
-				avail_val = 0;
-			show_val_kb(m, "MemTotal:       ", i.totalram);
-			show_val_kb(m, "MemFree:        ", free_val);
-			show_val_kb(m, "MemAvailable:   ", avail_val);
-		}
-		show_val_kb(m, "Buffers:        ", i.bufferram);
-		show_val_kb(m, "Cached:         ", cached);
-		show_val_kb(m, "SwapCached:     ", fake_swapcached);
-	}
+	show_val_kb(m, "MemTotal:       ", i.totalram);
+	show_val_kb(m, "MemFree:        ", i.freeram + rbinfree + hugepage_pool_pages);
+	show_val_kb(m, "MemAvailable:   ", available + rbinfree + hugepage_pool_pages);
+	show_val_kb(m, "Buffers:        ", i.bufferram);
+	show_val_kb(m, "Cached:         ", cached);
+	show_val_kb(m, "SwapCached:     ", total_swapcache_pages());
 	show_val_kb(m, "Active:         ", pages[LRU_ACTIVE_ANON] +
 					   pages[LRU_ACTIVE_FILE]);
 	show_val_kb(m, "Inactive:       ", pages[LRU_INACTIVE_ANON] +

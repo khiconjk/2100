@@ -10,7 +10,6 @@
 
 #include <linux/ctype.h>
 #include <linux/lcd.h>
-#include <linux/ghost_storage.h>
 
 #include "panel.h"
 #include "panel_drv.h"
@@ -644,7 +643,16 @@ static ssize_t manufacture_code_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	u8 code[5] = { 0, };
-	ghost_storage_get_panel_manf_code(code);
+	struct panel_info *panel_data;
+	struct panel_device *panel = dev_get_drvdata(dev);
+
+	if (panel == NULL) {
+		panel_err("panel is null\n");
+		return -EINVAL;
+	}
+	panel_data = &panel->panel_data;
+
+	resource_copy_by_name(panel_data, code, "code");
 
 	snprintf(buf, PAGE_SIZE, "%02X%02X%02X%02X%02X\n",
 		code[0], code[1], code[2], code[3], code[4]);
@@ -662,7 +670,17 @@ static ssize_t cell_id_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	u8 date[PANEL_DATE_LEN] = { 0, }, coordinate[4] = { 0, };
-	ghost_storage_get_panel_cell_id(date, coordinate);
+	struct panel_info *panel_data;
+	struct panel_device *panel = dev_get_drvdata(dev);
+
+	if (panel == NULL) {
+		panel_err("panel is null\n");
+		return -EINVAL;
+	}
+	panel_data = &panel->panel_data;
+
+	resource_copy_by_name(panel_data, date, "date");
+	resource_copy_by_name(panel_data, coordinate, "coordinate");
 
 	snprintf(buf, PAGE_SIZE, "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\n",
 		date[0], date[1], date[2], date[3], date[4], date[5], date[6],
@@ -680,10 +698,46 @@ static ssize_t SVC_OCTA_show(struct device *dev,
 static ssize_t octa_id_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	char fake_octa[18] = { 0, };
-	ghost_storage_get_panel_octa_id(fake_octa, sizeof(fake_octa));
+	int i, site, rework, poc;
+	u8 cell_id[16], octa_id[PANEL_OCTA_ID_LEN] = { 0, };
+	struct panel_info *panel_data;
+	struct panel_device *panel = dev_get_drvdata(dev);
+	int len = 0;
+	bool cell_id_exist = true;
 
-	return snprintf(buf, PAGE_SIZE, "100a1b2%s\n", fake_octa);
+	if (panel == NULL) {
+		panel_err("panel is null\n");
+		return -EINVAL;
+	}
+	panel_data = &panel->panel_data;
+	resource_copy_by_name(panel_data, octa_id, "octa_id");
+
+	site = (octa_id[0] >> 4) & 0x0F;
+	rework = octa_id[0] & 0x0F;
+	poc = octa_id[1] & 0x0F;
+
+	panel_dbg("site (%d), rework (%d), poc (%d)\n",
+			site, rework, poc);
+
+	panel_dbg("<CELL ID>\n");
+	for (i = 0; i < 16; i++) {
+		cell_id[i] = isalnum(octa_id[i + 4]) ? octa_id[i + 4] : '\0';
+		panel_dbg("%x -> %c\n", octa_id[i + 4], cell_id[i]);
+		if (cell_id[i] == '\0') {
+			cell_id_exist = false;
+			break;
+		}
+	}
+
+	len += snprintf(buf + len, PAGE_SIZE - len, "%d%d%d%02x%02x",
+			site, rework, poc, octa_id[2], octa_id[3]);
+	if (cell_id_exist) {
+		for (i = 0; i < 16; i++)
+			len += snprintf(buf + len, PAGE_SIZE - len, "%c", cell_id[i]);
+	}
+	len += snprintf(buf + len, PAGE_SIZE - len, "\n");
+
+	return strlen(buf);
 }
 
 static ssize_t SVC_OCTA_CHIPID_show(struct device *dev,

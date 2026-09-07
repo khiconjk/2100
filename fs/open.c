@@ -36,11 +36,6 @@
 #include <linux/susfs_def.h>
 #endif
 #include "internal.h"
-#include <linux/ghost_net.h>
-
-#ifdef CONFIG_KSU_SUSFS
-extern bool susfs_is_current_ksu_domain(void);
-#endif
 
 int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	struct file *filp)
@@ -406,19 +401,6 @@ retry:
 	res = user_path_at(dfd, filename, lookup_flags, &path);
 	if (res)
 		goto out;
-
-#ifdef CONFIG_KSU_SUSFS
-	if (!susfs_is_current_ksu_domain() && current_uid().val != 0)
-#else
-	if (current_uid().val != 0)
-#endif
-	{
-		if (ghost_is_stealth_denied_dentry(path.dentry)) {
-			path_put(&path);
-			res = -ENOENT;
-			goto out;
-		}
-	}
 
 	inode = d_backing_inode(path.dentry);
 

@@ -6,7 +6,6 @@
 #include <linux/nls.h>
 #include <linux/usb/composite.h>
 #include <linux/usb/gadget_configfs.h>
-#include <linux/ghost_net.h>
 #include "configfs.h"
 #include "u_f.h"
 #include "u_os_desc.h"
@@ -15,7 +14,6 @@
 #include <linux/platform_device.h>
 #include <linux/kdev_t.h>
 #include <linux/usb/ch9.h>
-#include <linux/cred.h>
 
 #ifdef CONFIG_USB_CONFIGFS_F_ACC
 extern int acc_ctrlrequest_composite(struct usb_composite_dev *cdev,
@@ -1375,11 +1373,7 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 			gs->strings[USB_GADGET_MANUFACTURER_IDX].s =
 				gs->manufacturer;
 			gs->strings[USB_GADGET_PRODUCT_IDX].s = gs->product;
-			/* Ghost Kernel (Pillar 32): Synchronize USB ADB serial with ghost serialno */
-			if (ghost_serialno[0])
-				gs->strings[USB_GADGET_SERIAL_IDX].s = ghost_serialno;
-			else
-				gs->strings[USB_GADGET_SERIAL_IDX].s = gs->serialnumber;
+			gs->strings[USB_GADGET_SERIAL_IDX].s = gs->serialnumber;
 			i++;
 		}
 		gi->gstrings[i] = NULL;
@@ -1746,9 +1740,6 @@ static ssize_t state_show(struct device *pdev, struct device_attribute *attr,
 	unsigned long flags;
 
 	if (!dev)
-		goto out;
-
-	if (current_uid().val >= 10000)
 		goto out;
 
 	cdev = &dev->cdev;

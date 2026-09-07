@@ -26,7 +26,7 @@
 #include <linux/quota.h>
 #include <linux/unicode.h>
 #include <linux/iversion.h>
-#include <linux/ghost_storage.h>
+#include <linux/ghost_config.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -3784,8 +3784,6 @@ try_onemore:
 
 	sb->s_fs_info = sbi;
 	sbi->raw_super = raw_super;
-
-	ghost_storage_on_f2fs_mount(raw_super->uuid);
 
 	/* precompute checksum seed for metadata */
 	if (f2fs_sb_has_inode_chksum(sbi))

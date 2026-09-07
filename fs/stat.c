@@ -24,7 +24,6 @@
 
 #include <linux/uaccess.h>
 #include <linux/ghost_uptime.h>
-#include <linux/ghost_net.h>
 #include <asm/unistd.h>
 
 
@@ -132,32 +131,15 @@ EXPORT_SYMBOL(vfs_getattr_nosec);
  *
  * 0 will be returned on success, and a -ve error code if unsuccessful.
  */
-#ifdef CONFIG_KSU_SUSFS
-extern bool susfs_is_current_ksu_domain(void);
-#endif
-
 int vfs_getattr(const struct path *path, struct kstat *stat,
 		u32 request_mask, unsigned int query_flags)
 {
 	int retval;
 
-	/* Ghost Kernel (Pillar 29): Stealth Protection - Return -ENOENT for root/ghost nodes */
-	if (current_uid().val != 0
-#ifdef CONFIG_KSU_SUSFS
-	    && !susfs_is_current_ksu_domain()
-#endif
-	   ) {
-		if (path && path->dentry && ghost_is_stealth_denied_dentry(path->dentry))
-			return -ENOENT;
-	}
-
 	retval = security_inode_getattr(path);
 	if (retval)
 		return retval;
-	retval = vfs_getattr_nosec(path, stat, request_mask, query_flags);
-	if (!retval)
-		ghost_apply_stat_reset(path, stat);
-	return retval;
+	return vfs_getattr_nosec(path, stat, request_mask, query_flags);
 }
 EXPORT_SYMBOL_NS(vfs_getattr, ANDROID_GKI_VFS_EXPORT_ONLY);
 

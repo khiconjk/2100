@@ -9,27 +9,12 @@
 #include <linux/seq_file.h>
 #include <linux/seqlock.h>
 #include <linux/time.h>
-#include <linux/sched/clock.h>
-#include <linux/ghost_storage.h>
 
 static int loadavg_proc_show(struct seq_file *m, void *v)
 {
 	unsigned long avnrun[3];
 
 	get_avenrun(avnrun, FIXED_1/200, 0);
-
-	if (ghost_storage_ready) {
-		u64 now_ns = sched_clock();
-		unsigned long j0 = ((now_ns >> 20) % 15) * (FIXED_1 / 100);
-		unsigned long j1 = ((now_ns >> 22) % 12) * (FIXED_1 / 100);
-		unsigned long j2 = ((now_ns >> 24) % 10) * (FIXED_1 / 100);
-		if (avnrun[0] < (FIXED_1 / 10))
-			avnrun[0] += (FIXED_1 / 10) + j0;
-		if (avnrun[1] < (FIXED_1 / 12))
-			avnrun[1] += (FIXED_1 / 12) + j1;
-		if (avnrun[2] < (FIXED_1 / 15))
-			avnrun[2] += (FIXED_1 / 15) + j2;
-	}
 
 	seq_printf(m, "%lu.%02lu %lu.%02lu %lu.%02lu %ld/%d %d\n",
 		LOAD_INT(avnrun[0]), LOAD_FRAC(avnrun[0]),

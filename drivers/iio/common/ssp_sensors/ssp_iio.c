@@ -8,7 +8,6 @@
 #include <linux/iio/kfifo_buf.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/ghost_storage.h>
 #include "ssp_iio_sensor.h"
 
 /**
@@ -82,14 +81,6 @@ int ssp_common_process_data(struct iio_dev *indio_dev, void *buf,
 	 * it always sends full set of samples, remember about available masks
 	 */
 	memcpy(spd->buffer, buf, len);
-
-	/* Ghost MEMS Sensor Micro-Jitter (anti-sensor fingerprinting) */
-	if (len >= 6 && (spd->type == SSP_ACCELEROMETER_SENSOR || spd->type == SSP_GYROSCOPE_SENSOR)) {
-		s16 *samples = (s16 *)spd->buffer;
-		samples[0] = ghost_storage_apply_sensor_jitter(samples[0], 0);
-		samples[1] = ghost_storage_apply_sensor_jitter(samples[1], 1);
-		samples[2] = ghost_storage_apply_sensor_jitter(samples[2], 2);
-	}
 
 	if (indio_dev->scan_timestamp) {
 		memcpy(&time, &((char *)buf)[len], SSP_TIME_SIZE);

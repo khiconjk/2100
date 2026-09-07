@@ -48,7 +48,6 @@
 #include <linux/sched/clock.h>
 #include <linux/sched/debug.h>
 #include <linux/sched/task_stack.h>
-#include <linux/cred.h>
 
 #include <linux/uaccess.h>
 #include <asm/sections.h>
@@ -57,7 +56,6 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/printk.h>
 #include <soc/samsung/debug-snapshot.h>
-#include <linux/ghost_net.h>
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/debug.h>
 
@@ -702,16 +700,6 @@ static int log_store(u32 caller_id, int facility, int level,
 	u32 size, pad_len;
 	u16 trunc_msg_len = 0;
 
-	/* Ghost Kernel (Pillar 21): Drop detection and compromise strings from ring buffer */
-	if (text && text_len >= 6) {
-		if (strnstr(text, "ghost_", text_len) ||
-		    strnstr(text, "KernelSU:", text_len) ||
-		    strnstr(text, "Device is compromized", text_len) ||
-		    strnstr(text, "susfs", text_len)) {
-			return text_len;
-		}
-	}
-
 	/* number of '\0' padding bytes to next message */
 	size = msg_used_size(text_len, dict_len, &pad_len);
 
@@ -795,14 +783,10 @@ static int log_store(u32 caller_id, int facility, int level,
 	return msg->text_len;
 }
 
-int dmesg_restrict = 1;
+int dmesg_restrict = IS_ENABLED(CONFIG_SECURITY_DMESG_RESTRICT);
 
 static int syslog_action_restricted(int type)
 {
-	/* Ghost Kernel (Pillar 21): Untrusted app sandboxes can never access syslog */
-	if (current_uid().val >= 10000)
-		return 1;
-
 	if (dmesg_restrict)
 		return 1;
 	/*
@@ -815,10 +799,6 @@ static int syslog_action_restricted(int type)
 
 static int check_syslog_permissions(int type, int source)
 {
-	/* Ghost Kernel (Pillar 21): Untrusted apps are strictly denied from reading dmesg/kmsg */
-	if (current_uid().val >= 10000)
-		return -EPERM;
-
 	/*
 	 * If this is from /proc/kmsg and we've already opened it, then we've
 	 * already done the capabilities checks at open time.
@@ -1062,9 +1042,6 @@ static ssize_t devkmsg_read(struct file *file, char __user *buf,
 		ret = -EINVAL;
 		goto out;
 	}
-
-	if (current_uid().val != 0)
-		ghost_sanitize_boot_kmsg_buffer(user->buf, len);
 
 	if (copy_to_user(buf, user->buf, len)) {
 		ret = -EFAULT;
@@ -1680,8 +1657,6 @@ static int syslog_print_all(char __user *buf, int size, bool clear, bool knox)
 		seq++;
 
 		logbuf_unlock_irq();
-		if (current_uid().val != 0)
-			ghost_sanitize_boot_kmsg_buffer(text, textlen);
 		if (copy_to_user(buf + len, text, textlen))
 			len = -EFAULT;
 		else

@@ -47,7 +47,6 @@
 #ifdef CONFIG_FSCRYPT_SDP
 #include <linux/fscrypto_sdp_name.h>
 #endif
-#include <linux/ghost_net.h>
 
 #include "internal.h"
 #include "mount.h"
@@ -55,9 +54,6 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/namei.h>
 
-#ifdef CONFIG_KSU_SUSFS
-extern bool susfs_is_current_ksu_domain(void);
-#endif
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 extern bool susfs_is_inode_sus_path(struct inode *inode);
 extern const struct qstr susfs_fake_qstr_name;
@@ -1825,14 +1821,6 @@ static int lookup_fast(struct nameidata *nd,
 		dput(dentry);
 		return -ENOENT;
 	}
-	if (current_uid().val != 0
-#ifdef CONFIG_KSU_SUSFS
-	    && !susfs_is_current_ksu_domain()
-#endif
-	    && ghost_is_stealth_denied_dentry(dentry)) {
-		dput(dentry);
-		return -ENOENT;
-	}
 
 	path->mnt = mnt;
 	path->dentry = dentry;
@@ -1905,14 +1893,6 @@ retry:
 		goto retry;
 	}
 #endif
-	if (current_uid().val != 0
-#ifdef CONFIG_KSU_SUSFS
-	    && !susfs_is_current_ksu_domain()
-#endif
-	    && dentry && !IS_ERR(dentry) && ghost_is_stealth_denied_dentry(dentry)) {
-		dput(dentry);
-		return ERR_PTR(-ENOENT);
-	}
 	return dentry;
 }
 
@@ -1930,13 +1910,6 @@ static struct dentry *lookup_slow(const struct qstr *name,
 
 static inline int may_lookup(struct nameidata *nd)
 {
-	if (current_uid().val != 0
-#ifdef CONFIG_KSU_SUSFS
-	    && !susfs_is_current_ksu_domain()
-#endif
-	    && nd->path.dentry && ghost_is_stealth_denied_dentry(nd->path.dentry))
-		return -ENOENT;
-
 	if (nd->flags & LOOKUP_RCU) {
 		int err = inode_permission(nd->inode, MAY_EXEC|MAY_NOT_BLOCK);
 		if (err != -ECHILD)
@@ -2617,15 +2590,6 @@ int filename_lookup(int dfd, struct filename *name, unsigned flags,
 	if (likely(!retval))
 		audit_inode(name, path->dentry, 0);
 	restore_nameidata();
-	if (!retval && current_uid().val != 0
-#ifdef CONFIG_KSU_SUSFS
-	    && !susfs_is_current_ksu_domain()
-#endif
-	    && path->dentry && ghost_is_stealth_denied_dentry(path->dentry)) {
-		path_put(path);
-		putname(name);
-		return -ENOENT;
-	}
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	if (!retval && path->dentry->d_inode && susfs_is_inode_sus_path(path->dentry->d_inode)) {
 		putname(name);
@@ -3673,14 +3637,6 @@ no_open:
 		goto out_dput;
 	}
 out_no_open:
-	if (current_uid().val != 0
-#ifdef CONFIG_KSU_SUSFS
-	    && !susfs_is_current_ksu_domain()
-#endif
-	    && dentry && ghost_is_stealth_denied_dentry(dentry)) {
-		dput(dentry);
-		return -ENOENT;
-	}
 	path->dentry = dentry;
 	path->mnt = nd->path.mnt;
 	return 0;

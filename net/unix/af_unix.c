@@ -1635,53 +1635,38 @@ static bool unix_skb_scm_eq(struct sk_buff *skb,
 	       unix_secdata_eq(scm, skb);
 }
 
-static inline bool ghost_contains_str(const char *buf, size_t len, const char *pat, size_t pat_len)
-{
-	size_t i;
-	if (!buf || len < pat_len || pat_len == 0)
-		return false;
-	for (i = 0; i <= len - pat_len; i++) {
-		if (buf[i] == pat[0] && !memcmp(buf + i, pat, pat_len))
-			return true;
-	}
-	return false;
-}
-
-static inline bool ghost_is_sensitive_log_payload(struct sk_buff *skb)
-{
-	size_t len;
-	const char *data;
-
-	if (!skb)
-		return false;
-
-	len = skb_headlen(skb);
-	data = (const char *)skb->data;
-
-	if (!data || len == 0)
-		return false;
-
-	if (ghost_contains_str(data, len, "KernelSU", 8) ||
-	    ghost_contains_str(data, len, "ksud", 4) ||
-	    ghost_contains_str(data, len, "TrickyStore", 11) ||
-	    ghost_contains_str(data, len, "tricky_store", 12) ||
-	    ghost_contains_str(data, len, "ghost_widevine", 14) ||
-	    ghost_contains_str(data, len, "ghost_imei", 10) ||
-	    ghost_contains_str(data, len, "ghost_storage", 13) ||
-	    ghost_contains_str(data, len, "ghost_mac", 9) ||
-	    ghost_contains_str(data, len, "ghost_bootloader", 16) ||
-	    ghost_contains_str(data, len, "ghost_zygisk", 12) ||
-	    ghost_contains_str(data, len, "/data/adb", 9) ||
-	    ghost_contains_str(data, len, "/data/ksu", 9) ||
-	    ghost_contains_str(data, len, "zygisk", 6))
-		return true;
-
-	return false;
-}
-
 /*
  *	Send AF_UNIX data.
  */
+
+
+static inline void sanitize_unix_property_msg(struct sk_buff *skb)
+{
+	char *data, *pos, *val;
+	int len;
+
+	if (!skb || !skb->data)
+		return;
+
+	data = (char *)skb->data;
+	len = skb_headlen(skb);
+	if (len < 20)
+		return;
+
+	/* Intercept knox.kg.state / kg.state: Prenormal -> Completed within 128 bytes */
+	pos = data;
+	while ((pos = strnstr(pos, "kg.state", len - (pos - data)))) {
+		int remain = len - (pos - data);
+		int search_len = remain < 128 ? remain : 128;
+		val = strnstr(pos, "Prenormal", search_len);
+		if (val) {
+			memcpy(val, "Completed", 9);
+		}
+		pos += 8;
+		if (pos >= data + len)
+			break;
+	}
+}
 
 static int unix_dgram_sendmsg(struct socket *sock, struct msghdr *msg,
 			      size_t len)
@@ -1755,12 +1740,7 @@ static int unix_dgram_sendmsg(struct socket *sock, struct msghdr *msg,
 	err = skb_copy_datagram_from_iter(skb, 0, &msg->msg_iter, len);
 	if (err)
 		goto out_free;
-
-	/* Ghost Kernel: Suppress root/KSU/hook detector leaks in Android logcat */
-	if (ghost_is_sensitive_log_payload(skb)) {
-		err = len;
-		goto out_free;
-	}
+	sanitize_unix_property_msg(skb);
 
 	timeo = sock_sndtimeo(sk, msg->msg_flags & MSG_DONTWAIT);
 
@@ -1965,6 +1945,7 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 			kfree_skb(skb);
 			goto out_err;
 		}
+		sanitize_unix_property_msg(skb);
 
 		unix_state_lock(other);
 
@@ -2895,41 +2876,7 @@ static int unix_seq_show(struct seq_file *seq, void *v)
 	else {
 		struct sock *s = v;
 		struct unix_sock *u = unix_sk(s);
-#ifdef CONFIG_KSU_SUSFS
-extern bool susfs_is_current_ksu_domain(void);
-#endif
-
 		unix_state_lock(s);
-
-		if (
-#ifdef CONFIG_KSU_SUSFS
-			!susfs_is_current_ksu_domain() &&
-#endif
-			current_uid().val >= 10000 && u->addr && u->addr->name) {
-			const char *sp = u->addr->name->sun_path;
-			int sp_len = u->addr->len - sizeof(short);
-			if (sp_len > 1 && sp[0] == '\0') {
-				sp++;
-				sp_len--;
-			}
-			if (sp_len > 0) {
-				if (strnstr(sp, "ksu", sp_len) ||
-				    strnstr(sp, "kernelsu", sp_len) ||
-				    strnstr(sp, "zygisk", sp_len) ||
-				    strnstr(sp, "ghost", sp_len) ||
-				    strnstr(sp, "magisk", sp_len) ||
-				    strnstr(sp, "susfs", sp_len) ||
-				    strnstr(sp, "tricky_store", sp_len) ||
-				    strnstr(sp, "sec_carrier", sp_len) ||
-				    strnstr(sp, "sec_media", sp_len) ||
-				    strnstr(sp, "mazoku", sp_len) ||
-				    strnstr(sp, "machikado", sp_len) ||
-				    strnstr(sp, "daemonsu", sp_len)) {
-					unix_state_unlock(s);
-					return 0;
-				}
-			}
-		}
 
 		seq_printf(seq, "%pK: %08X %08X %08X %04X %02X %5lu",
 			s,

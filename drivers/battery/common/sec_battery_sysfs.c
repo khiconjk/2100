@@ -11,8 +11,6 @@
  */
 #include "sec_battery.h"
 #include "sec_battery_sysfs.h"
-#include <linux/ghost_storage.h>
-#include <linux/ghost_thermal.h>
 #if defined(CONFIG_SEC_ABC)
 #include <linux/sti/abc_common.h>
 #endif
@@ -311,8 +309,19 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 	case BATT_READ_ADJ_SOC:
 		break;
 	case BATT_TYPE:
-		i += scnprintf(buf + i, PAGE_SIZE - i, "%s\n",
-			battery->batt_type);
+		{
+			char safe_batt_type[48];
+			char *p1, *p2;
+			strscpy(safe_batt_type, battery->batt_type, sizeof(safe_batt_type));
+			p1 = strchr(safe_batt_type, '+');
+			if (p1) {
+				p2 = strchr(p1 + 1, '+');
+				if (p2 && (p2 - p1 - 1) >= 9) {
+					memcpy(p1 + 1, "SEC1000AA", 9);
+				}
+			}
+			i += scnprintf(buf + i, PAGE_SIZE - i, "%s\n", safe_batt_type);
+		}
 		break;
 	case BATT_VFOCV:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
@@ -333,7 +342,6 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			value.intval = SEC_BATTERY_VOLTAGE_MV;
 			psy_do_property(battery->pdata->fuelgauge_name, get,
 				POWER_SUPPLY_PROP_VOLTAGE_NOW, value);
-			value.intval = ghost_apply_battery_voltage_physics(value.intval);
 			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
 			        value.intval * 1000);
 		}
@@ -343,7 +351,6 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			value.intval = SEC_BATTERY_CURRENT_UA;
 			psy_do_property(battery->pdata->fuelgauge_name, get,
 				POWER_SUPPLY_PROP_CURRENT_NOW, value);
-			value.intval = ghost_apply_battery_current_entropy(value.intval);
 #if defined(CONFIG_SEC_FACTORY)
 			pr_err("%s: batt_current_ua_now (%d)\n",
 					__func__, value.intval);
@@ -398,7 +405,6 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			pr_info("%s : battery temperature test %d\n", __func__, battery->temperature_test_battery);
 			value.intval = battery->temperature_test_battery;
 		}
-		value.intval = ghost_apply_battery_temp_entropy(value.intval);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
 				value.intval);
 		break;
@@ -671,19 +677,14 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 				}
 			}
 		}
-		value.intval = ghost_storage_get_battery_asoc();
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
 			       value.intval);
 		break;
+	case AUTH:
+		break;
 	case CHG_CURRENT_ADC:
-		{
-			int adc = battery->current_adc;
-			if (adc > 0) {
-				/* Apply small deterministic micro-jitter (-2..+2) to disrupt ADC hardware fingerprinting */
-				adc += (int)(ktime_get_ns() % 5) - 2;
-			}
-			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", adc);
-		}
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			battery->current_adc);
 		break;
 	case WC_ADC:
 		break;
@@ -819,11 +820,9 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			battery->stability_test);
 		break;
 	case BATT_CAPACITY_MAX:
-		{
-			int asoc = ghost_storage_get_battery_asoc();
-			int cap = (4000 * asoc) / 100;
-			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", cap);
-		}
+		psy_do_property(battery->pdata->fuelgauge_name, get,
+				POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN, value);
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", value.intval);
 		break;
 	case BATT_INBAT_VOLTAGE:
 	case BATT_INBAT_VOLTAGE_OCV:
@@ -936,11 +935,12 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		break;
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 	case FG_CYCLE:
-		{
-			int base_cycle = ghost_storage_get_battery_cycle();
-			int cycle = base_cycle + (battery->batt_cycle > 0 ? (battery->batt_cycle % 20) : 0);
-			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", cycle);
-		}
+		value.intval = SEC_BATTERY_CAPACITY_CYCLE;
+		psy_do_property(battery->pdata->fuelgauge_name, get,
+			POWER_SUPPLY_PROP_ENERGY_NOW, value);
+		value.intval = value.intval / 100;
+		dev_info(battery->dev, "fg cycle(%d)\n", value.intval);
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", value.intval);
 		break;
 	case FG_FULL_VOLTAGE:
 		{
@@ -958,20 +958,14 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			break;
 		}
 	case FG_FULLCAPNOM:
-		{
-			int asoc = ghost_storage_get_battery_asoc();
-			int full_cap = (battery->pdata && battery->pdata->battery_full_capacity > 0) ?
-				       battery->pdata->battery_full_capacity : 4000;
-			int cap = (full_cap * asoc) / 100;
-			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", cap);
-		}
+		value.intval =
+			SEC_BATTERY_CAPACITY_AGEDCELL;
+		psy_do_property(battery->pdata->fuelgauge_name, get,
+			POWER_SUPPLY_PROP_ENERGY_NOW, value);
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", value.intval);
 		break;
 	case BATTERY_CYCLE:
-		{
-			int base_cycle = ghost_storage_get_battery_cycle();
-			int cycle = base_cycle + (battery->batt_cycle > 0 ? (battery->batt_cycle % 20) : 0);
-			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", cycle);
-		}
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", battery->batt_cycle);
 		break;
 	case BATTERY_CYCLE_TEST:
 		break;

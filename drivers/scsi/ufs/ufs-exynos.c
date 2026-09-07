@@ -27,7 +27,6 @@
 #include <soc/samsung/exynos-cpupm.h>
 #include <linux/sec_class.h>
 #include <linux/sec_debug.h>
-#include <linux/ghost_storage.h>
 
 #if IS_ENABLED(CONFIG_SEC_ABC)
 #include <linux/sti/abc_common.h>
@@ -556,7 +555,18 @@ static void ufs_set_sec_unique_number(struct ufs_hba *hba, u8 *desc_buf)
 	}
 
 	/* setup unique_number */
-	ghost_storage_get_ufs_un(ufs_vdi.unique_number, sizeof(ufs_vdi.unique_number));
+	manid = desc_buf[DEVICE_DESC_PARAM_MANF_ID + 1];
+	memset(snum_buf, 0, sizeof(snum_buf));
+	memcpy(snum_buf, str_desc_buf + QUERY_DESC_HDR_SIZE, SERIAL_NUM_SIZE);
+	memset(ufs_vdi.unique_number, 0, sizeof(ufs_vdi.unique_number));
+
+	sprintf(ufs_vdi.unique_number, "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
+		manid,
+		desc_buf[DEVICE_DESC_PARAM_MANF_DATE], desc_buf[DEVICE_DESC_PARAM_MANF_DATE+1],
+		snum_buf[0], snum_buf[1], snum_buf[2], snum_buf[3], snum_buf[4], snum_buf[5], snum_buf[6]);
+
+	/* Null terminate the unique number string */
+	ufs_vdi.unique_number[UFS_UN_20_DIGITS] = '\0';
 
 	dev_dbg(hba->dev, "%s: ufs un : %s\n", __func__, ufs_vdi.unique_number);
 out:
@@ -1071,9 +1081,7 @@ wb_disabled:
 static ssize_t ufs_unique_number_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	char fake_un[GHOST_UFS_UN_LEN + 1];
-	ghost_storage_get_ufs_un(fake_un, sizeof(fake_un));
-	return snprintf(buf, PAGE_SIZE, "%s\n", fake_un);
+	return snprintf(buf, PAGE_SIZE, "%s\n", ufs_vdi.unique_number);
 }
 static DEVICE_ATTR(un, 0440, ufs_unique_number_show, NULL);
 

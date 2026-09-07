@@ -1170,9 +1170,7 @@ void wq_func_group(struct is_device_ischain *device,
 
 	if (status) {
 		lindex = frame->shot->ctl.vendor_entry.lowIndexParam;
-		lindex &= ~frame->shot->dm.vendor_entry.lowIndexParam;
 		hindex = frame->shot->ctl.vendor_entry.highIndexParam;
-		hindex &= ~frame->shot->dm.vendor_entry.highIndexParam;
 	}
 
 	if (unlikely(fcount != frame->fcount)) {

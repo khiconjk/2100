@@ -15,7 +15,6 @@
 #include <linux/power_supply.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
-#include <linux/ghost_thermal.h>
 
 #include "power_supply.h"
 
@@ -287,14 +286,7 @@ static ssize_t power_supply_show_property(struct device *dev,
 				dev_err_ratelimited(dev,
 					"driver failed to report `%s' property: %zd\n",
 					attr->attr.name, ret);
-			/* Ghost Kernel (Pillar 47): Safe integer fallback for SSRM/Framework readers */
-			if (psp == POWER_SUPPLY_PROP_CURRENT_NOW ||
-			    psp == POWER_SUPPLY_PROP_VOLTAGE_NOW ||
-			    psp == POWER_SUPPLY_PROP_TEMP) {
-				value.intval = 0;
-			} else {
-				return ret;
-			}
+			return ret;
 		}
 	}
 
@@ -304,21 +296,6 @@ static ssize_t power_supply_show_property(struct device *dev,
 	}
 
 	switch (psp) {
-	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-		if (value.intval > 2000000)
-			value.intval = ghost_apply_battery_voltage_physics(value.intval / 1000) * 1000;
-		else
-			value.intval = ghost_apply_battery_voltage_physics(value.intval);
-		ret = sprintf(buf, "%d\n", value.intval);
-		break;
-	case POWER_SUPPLY_PROP_CURRENT_NOW:
-		value.intval = ghost_apply_battery_current_entropy(value.intval);
-		ret = sprintf(buf, "%d\n", value.intval);
-		break;
-	case POWER_SUPPLY_PROP_TEMP:
-		value.intval = ghost_apply_battery_temp_entropy(value.intval);
-		ret = sprintf(buf, "%d\n", value.intval);
-		break;
 	case POWER_SUPPLY_PROP_USB_TYPE:
 		ret = power_supply_show_usb_type(dev, psy->desc,
 						&value, buf);

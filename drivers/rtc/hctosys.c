@@ -39,7 +39,7 @@ int rtc_hctosys(void)
 	err = rtc_read_time(rtc, &tm);
 	if (!err) {
 		tv64.tv_sec = rtc_tm_to_time64(&tm);
-
+		/* do_settimeofday64() shifts this real RTC value into the ghost epoch. */
 		err = do_settimeofday64(&tv64);
 		dev_info(rtc->dev.parent,
 			"setting system clock to %ptRd %ptRt UTC (%lld)\n",

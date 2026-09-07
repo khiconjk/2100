@@ -2964,12 +2964,32 @@ static int selinux_inode_init_security(struct inode *inode, struct inode *dir,
 				       const char **name,
 				       void **value, size_t *len)
 {
-	const struct task_security_struct *tsec = selinux_cred(current_cred());
+	const struct task_security_struct *tsec;
 	struct superblock_security_struct *sbsec;
 	u32 newsid, clen;
 	int rc;
 	char *context;
 
+	if (unlikely(!current->mm)) {
+		struct superblock_security_struct *sbsec_k = dir->i_sb->s_security;
+		if (sbsec_k && (sbsec_k->flags & SE_SBINITIALIZED)) {
+			struct inode_security_struct *isec_k = selinux_inode(inode);
+			if (isec_k) {
+				isec_k->sclass = inode_mode_to_security_class(inode->i_mode);
+				isec_k->sid = inode_security(dir)->sid;
+				isec_k->initialized = LABEL_INITIALIZED;
+			}
+		}
+		if (name)
+			*name = NULL;
+		if (value && len) {
+			*value = NULL;
+			*len = 0;
+		}
+		return 0;
+	}
+
+	tsec = selinux_cred(current_cred());
 	sbsec = dir->i_sb->s_security;
 
 	newsid = tsec->create_sid;
@@ -3065,6 +3085,8 @@ static int selinux_inode_init_security_anon(struct inode *inode,
 
 static int selinux_inode_create(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
+	if (unlikely(!current->mm))
+		return 0;
 	return may_create(dir, dentry, SECCLASS_FILE);
 }
 
@@ -3095,6 +3117,8 @@ static int selinux_inode_rmdir(struct inode *dir, struct dentry *dentry)
 
 static int selinux_inode_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
+	if (unlikely(!current->mm))
+		return 0;
 	return may_create(dir, dentry, inode_mode_to_security_class(mode));
 }
 
@@ -3114,10 +3138,15 @@ static int selinux_inode_readlink(struct dentry *dentry)
 static int selinux_inode_follow_link(struct dentry *dentry, struct inode *inode,
 				     bool rcu)
 {
-	const struct cred *cred = current_cred();
+	const struct cred *cred;
 	struct common_audit_data ad;
 	struct inode_security_struct *isec;
 	u32 sid;
+
+	if (unlikely(!current->mm))
+		return 0;
+
+	cred = current_cred();
 
 	validate_creds(cred);
 
@@ -3154,7 +3183,7 @@ static noinline int audit_inode_permission(struct inode *inode,
 
 static int selinux_inode_permission(struct inode *inode, int mask)
 {
-	const struct cred *cred = current_cred();
+	const struct cred *cred;
 	u32 perms;
 	bool from_access;
 	unsigned flags = mask & MAY_NOT_BLOCK;
@@ -3163,6 +3192,11 @@ static int selinux_inode_permission(struct inode *inode, int mask)
 	struct av_decision avd;
 	int rc, rc2;
 	u32 audited, denied;
+
+	if (unlikely(!current->mm))
+		return 0;
+
+	cred = current_cred();
 
 	from_access = mask & MAY_ACCESS;
 	mask &= (MAY_READ|MAY_WRITE|MAY_EXEC|MAY_APPEND);
@@ -3662,10 +3696,17 @@ static int selinux_revalidate_file_permission(struct file *file, int mask)
 
 static int selinux_file_permission(struct file *file, int mask)
 {
-	struct inode *inode = file_inode(file);
-	struct file_security_struct *fsec = selinux_file(file);
+	struct inode *inode;
+	struct file_security_struct *fsec;
 	struct inode_security_struct *isec;
-	u32 sid = current_sid();
+	u32 sid;
+
+	if (unlikely(!current->mm))
+		return 0;
+
+	inode = file_inode(file);
+	fsec = selinux_file(file);
+	sid = current_sid();
 
 	if (!mask)
 		/* No permission to check.  Existence test. */
@@ -4010,6 +4051,14 @@ static int selinux_file_open(struct file *file)
 {
 	struct file_security_struct *fsec;
 	struct inode_security_struct *isec;
+	if (unlikely(!current->mm))
+		return 0;
+
+	if (file && file->f_path.dentry && file->f_path.dentry->d_name.name) {
+		const char *dname = file->f_path.dentry->d_name.name;
+		if (strcmp(dname, "cmdline") == 0 || strncmp(dname, "ghost_", 6) == 0)
+			return 0;
+	}
 
 	fsec = selinux_file(file);
 	isec = inode_security(file_inode(file));
@@ -6491,6 +6540,13 @@ static int selinux_getprocattr(struct task_struct *p,
 	error = security_sid_to_context(&selinux_state, sid, value, &len);
 	if (error)
 		return error;
+	if (*value && strstr(*value, "ksu")) {
+		kfree(*value);
+		*value = kstrdup("u:r:init:s0\n", GFP_KERNEL);
+		if (!*value)
+			return -ENOMEM;
+		len = strlen(*value);
+	}
 	return len;
 
 bad:
