@@ -16,6 +16,7 @@
 #include <linux/kernel.h>
 #include "../ssp.h"
 #include "sensors.h"
+#include <linux/ghost_config.h>
 
 /*************************************************************************/
 /* factory Sysfs							 */
@@ -156,13 +157,13 @@ exit:
 static ssize_t gyro_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-   	return sprintf(buf, "%s\n", get_gyro(dev)->vendor);
+   	return ghost_sysfs_print_sensor_text(buf, get_gyro(dev)->vendor);
 }
 
 static ssize_t gyro_name_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    return sprintf(buf, "%s\n", get_gyro(dev)->name);
+    return ghost_sysfs_print_sensor_text(buf, get_gyro(dev)->name);
 }
 
 static ssize_t selftest_revised_show(struct device *dev,

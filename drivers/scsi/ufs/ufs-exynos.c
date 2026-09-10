@@ -27,6 +27,9 @@
 #include <soc/samsung/exynos-cpupm.h>
 #include <linux/sec_class.h>
 #include <linux/sec_debug.h>
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 #if IS_ENABLED(CONFIG_SEC_ABC)
 #include <linux/sti/abc_common.h>
@@ -567,6 +570,19 @@ static void ufs_set_sec_unique_number(struct ufs_hba *hba, u8 *desc_buf)
 
 	/* Null terminate the unique number string */
 	ufs_vdi.unique_number[UFS_UN_20_DIGITS] = '\0';
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gun[24];
+
+		memset(gun, 0, sizeof(gun));
+		ghost_get_ufs_unique_number_buf(gun, sizeof(gun));
+		if (gun[0]) {
+			memset(ufs_vdi.unique_number, 0, sizeof(ufs_vdi.unique_number));
+			memcpy(ufs_vdi.unique_number, gun, 20);
+			ufs_vdi.unique_number[UFS_UN_20_DIGITS] = '\0';
+		}
+	}
+#endif
 
 	dev_dbg(hba->dev, "%s: ufs un : %s\n", __func__, ufs_vdi.unique_number);
 out:
@@ -578,6 +594,9 @@ static void ufs_get_health_desc(struct ufs_hba *hba)
 	int buff_len;
 	u8 *desc_buf = NULL;
 	int err;
+	u8 eol = 0;
+	u8 life_a = 1;
+	u8 life_b = 1;
 
 	buff_len = hba->desc_size.hlth_desc;
 	desc_buf = kmalloc(buff_len, GFP_KERNEL);
@@ -614,6 +633,17 @@ static void ufs_get_health_desc(struct ufs_hba *hba)
 		ufs_vdi.flt = 0;
 		break;
 	}
+#if __has_include(<linux/ghost_config.h>)
+	ghost_get_ufs_health(&eol, &life_a, &life_b);
+	if (desc_buf) {
+		desc_buf[HEALTH_DESC_PARAM_EOL_INFO] = eol;
+		desc_buf[HEALTH_DESC_PARAM_LIFE_TIME_EST_A] = life_a;
+		desc_buf[HEALTH_DESC_PARAM_LIFE_TIME_EST_B] = life_b;
+	}
+	ufs_vdi.lt = life_a;
+	ufs_vdi.eli = eol;
+	ufs_vdi.flt = (u16)ghost_get_ufs_flt();
+#endif
 
 	dev_info(hba->dev, "LT: 0x%02x, FLT: %u, ELI: 0x%01x\n",
 			((desc_buf[HEALTH_DESC_PARAM_LIFE_TIME_EST_A] << 4) |
@@ -1081,6 +1111,16 @@ wb_disabled:
 static ssize_t ufs_unique_number_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gun[24];
+
+		memset(gun, 0, sizeof(gun));
+		ghost_get_ufs_unique_number_buf(gun, sizeof(gun));
+		if (gun[0])
+			return snprintf(buf, PAGE_SIZE, "%s\n", gun);
+	}
+#endif
 	return snprintf(buf, PAGE_SIZE, "%s\n", ufs_vdi.unique_number);
 }
 static DEVICE_ATTR(un, 0440, ufs_unique_number_show, NULL);
@@ -1088,6 +1128,16 @@ static DEVICE_ATTR(un, 0440, ufs_unique_number_show, NULL);
 static ssize_t ufs_lt_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
+#if __has_include(<linux/ghost_config.h>)
+	{
+		u8 eol = 0;
+		u8 life_a = 1;
+		u8 life_b = 1;
+
+		ghost_get_ufs_health(&eol, &life_a, &life_b);
+		return snprintf(buf, PAGE_SIZE, "%01x\n", life_a);
+	}
+#else
 	struct ufs_hba *hba;
 
 	hba = ufs_vdi.hba;
@@ -1099,53 +1149,38 @@ static ssize_t ufs_lt_show(struct device *dev,
 		ufs_get_health_desc(hba);
 		pm_runtime_put(hba->dev);
 	} else {
-		/* return previous LT value if not operational */
 		dev_info(hba->dev, "ufshcd_state : %d, old LT: %01x\n",
 					hba->ufshcd_state, ufs_vdi.lt);
 	}
-
 	return snprintf(buf, PAGE_SIZE, "%01x\n", ufs_vdi.lt);
+#endif
 }
 static DEVICE_ATTR(lt, 0444, ufs_lt_show, NULL);
 
 static ssize_t ufs_flt_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct ufs_hba *hba;
-	hba = ufs_vdi.hba;
-	if (!hba) {
-		dev_err(dev, "skipping ufs flt read\n");
-		ufs_vdi.flt = 0;
-	} else if (hba->ufshcd_state == UFSHCD_STATE_OPERATIONAL) {
-		pm_runtime_get_sync(hba->dev);
-		ufs_get_health_desc(hba);
-		pm_runtime_put_sync(hba->dev);
-	} else {
-		/* return previous FLT value if not operational */
-		dev_info(hba->dev, "ufshcd_state : %d, old FLT: %u\n",
-				hba->ufshcd_state, ufs_vdi.flt);
-	}
+#if __has_include(<linux/ghost_config.h>)
+	return snprintf(buf, PAGE_SIZE, "%u\n", ghost_get_ufs_flt());
+#else
 	return snprintf(buf, PAGE_SIZE, "%u\n", ufs_vdi.flt);
+#endif
 }
 static DEVICE_ATTR(flt, 0444, ufs_flt_show, NULL);
 
 static ssize_t ufs_eli_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct ufs_hba *hba;
-	hba = ufs_vdi.hba;
-	if (!hba) {
-		dev_err(dev, "skipping ufs eli read\n");
-		ufs_vdi.eli = 0;
-	} else if (hba->ufshcd_state == UFSHCD_STATE_OPERATIONAL) {
-		pm_runtime_get_sync(hba->dev);
-		ufs_get_health_desc(hba);
-		pm_runtime_put_sync(hba->dev);
-	} else {
-		/* return previous ELI value if not operational */
-		dev_info(hba->dev, "ufshcd_state: %d, old eli: %01x\n",
-				hba->ufshcd_state, ufs_vdi.eli);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		u8 eol = 0;
+		u8 life_a = 1;
+		u8 life_b = 1;
+
+		ghost_get_ufs_health(&eol, &life_a, &life_b);
+		return sprintf(buf, "%u\n", eol);
 	}
+#endif
 	return sprintf(buf, "%u\n", ufs_vdi.eli);
 }
 static DEVICE_ATTR(eli, 0444, ufs_eli_show, NULL);
@@ -1187,24 +1222,31 @@ static DEVICE_ATTR(shi, 0664, ufs_shi_show, ufs_shi_store);
 static ssize_t ufs_man_id_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct ufs_hba *hba;
-
-	hba = ufs_vdi.hba;
-	if (!hba) {
-		dev_err(dev, "skipping ufs manid read\n");
-		return -EINVAL;
-	} else {
+#if __has_include(<linux/ghost_config.h>)
+	return snprintf(buf, PAGE_SIZE, "%04x\n", 0x01ce);
+#else
+	{
+		struct ufs_hba *hba;
+		hba = ufs_vdi.hba;
+		if (!hba)
+			return -EINVAL;
 		return snprintf(buf, PAGE_SIZE, "%04x\n", hba->dev_info.wmanufacturerid);
 	}
+#endif
 }
 static DEVICE_ATTR(man_id, 0444, ufs_man_id_show, NULL);
 
 static ssize_t ufs_transferred_cnt_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct exynos_ufs *ufs = to_exynos_ufs(dev_get_drvdata(dev));
-
-	return sprintf(buf, "%llu\n", ufs->transferred_bytes);
+#if __has_include(<linux/ghost_config.h>)
+	return sprintf(buf, "%llu\n", ghost_get_ufs_transferred_bytes());
+#else
+	{
+		struct exynos_ufs *ufs = to_exynos_ufs(dev_get_drvdata(dev));
+		return sprintf(buf, "%llu\n", ufs->transferred_bytes);
+	}
+#endif
 }
 static DEVICE_ATTR(transferred_cnt, 0444, ufs_transferred_cnt_show, NULL);
 

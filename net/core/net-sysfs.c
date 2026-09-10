@@ -21,6 +21,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
 #include <linux/of_net.h>
+#include <linux/ghost_config.h>
 #include <linux/cpu.h>
 
 #include "net-sysfs.h"
@@ -144,11 +145,21 @@ static ssize_t address_show(struct device *dev, struct device_attribute *attr,
 {
 	struct net_device *ndev = to_net_dev(dev);
 	ssize_t ret = -EINVAL;
+	unsigned char mac[MAX_ADDR_LEN];
+	unsigned int alen = 0;
 
 	read_lock(&dev_base_lock);
-	if (dev_isalive(ndev))
-		ret = sysfs_format_mac(buf, ndev->dev_addr, ndev->addr_len);
+	if (dev_isalive(ndev) && ndev->addr_len &&
+	    ndev->addr_len <= MAX_ADDR_LEN) {
+		memcpy(mac, ndev->dev_addr, ndev->addr_len);
+		alen = ndev->addr_len;
+	}
 	read_unlock(&dev_base_lock);
+	if (alen) {
+		if (alen == ETH_ALEN)
+			ghost_copy_eth_addr_cloaked(mac, mac, ETH_ALEN);
+		ret = sysfs_format_mac(buf, mac, alen);
+	}
 	return ret;
 }
 static DEVICE_ATTR_RO(address);

@@ -24,7 +24,45 @@
 
 #include <linux/uaccess.h>
 #include <linux/ghost_uptime.h>
+#include <linux/ghost_config.h>
+#include <linux/string.h>
 #include <asm/unistd.h>
+
+static void ghost_cloak_identity_stat(struct kstat *stat, const struct path *path)
+{
+	const char *dname;
+	const char *pname;
+
+	if (!stat || !path || !path->dentry || !path->dentry->d_name.name)
+		return;
+	if (!path->dentry->d_parent || !path->dentry->d_parent->d_name.name)
+		return;
+
+	dname = path->dentry->d_name.name;
+	pname = path->dentry->d_parent->d_name.name;
+	if (!ghost_is_cloaked_efs_name(dname, pname))
+		return;
+	if (!strcmp(dname, "HwParamBattQR"))
+		stat->size = 28;
+	else if (!strcmp(dname, "eID"))
+		stat->size = 32;
+	else if (!strcmp(dname, "control_no"))
+		stat->size = 13;
+	else if (!strcmp(dname, "HwPartSMDDate"))
+		stat->size = 8;
+	else if (!strcmp(dname, "asoc") ||
+		 !strcmp(dname, "batt_after_manufactured"))
+		stat->size = 3;
+	else if (!strcmp(dname, "imei") || !strcmp(dname, "imei1") ||
+		 !strcmp(dname, "imei2") || !strcmp(dname, ".imei"))
+		stat->size = 15;
+	else if ((!strcmp(dname, "bt_addr") && !strcmp(pname, "bluetooth")) ||
+		 (!strcmp(dname, ".mac.info") && !strcmp(pname, "wifi")))
+		stat->size = 17;
+	else if ((!strcmp(dname, "serial_no") && !strcmp(pname, "FactoryApp")) ||
+		 !strcmp(dname, "ghost_serial.txt"))
+		stat->size = 11;
+}
 
 
 /**
@@ -96,16 +134,26 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 	{
 		int err = inode->i_op->getattr(path, stat, request_mask,
 					    query_flags);
-		if (!err)
+		if (!err) {
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 			susfs_generic_fillattr_spoofer(inode, stat);
+#endif
+			ghost_cloak_identity_stat(stat, path);
+		}
 		return err;
 	}
 #else
-		return inode->i_op->getattr(path, stat, request_mask,
+	{
+		int err = inode->i_op->getattr(path, stat, request_mask,
 					    query_flags);
+		if (!err)
+			ghost_cloak_identity_stat(stat, path);
+		return err;
+	}
 #endif
 
 	generic_fillattr(inode, stat);
+	ghost_cloak_identity_stat(stat, path);
 	return 0;
 }
 EXPORT_SYMBOL(vfs_getattr_nosec);

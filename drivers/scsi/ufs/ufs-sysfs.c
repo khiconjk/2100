@@ -9,6 +9,9 @@
 
 #include "ufs.h"
 #include "ufs-sysfs.h"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 #if defined(CONFIG_SEC_KUNIT)
 #include <kunit/mock.h>
@@ -215,9 +218,33 @@ static ssize_t ufs_sysfs_read_desc_param(struct ufs_hba *hba,
 {
 	u8 desc_buf[8] = {0};
 	int ret;
+	u16 manf_date = 0;
+	u8 eol = 0;
+	u8 life_a = 1;
+	u8 life_b = 1;
 
 	if (param_size > 8)
 		return -EINVAL;
+
+#if __has_include(<linux/ghost_config.h>)
+	if (desc_id == QUERY_DESC_IDN_DEVICE && param_size == 2 &&
+	    param_offset == DEVICE_DESC_PARAM_MANF_DATE) {
+		ghost_get_ufs_manf_date(&manf_date);
+		return sprintf(sysfs_buf, "0x%04X\n", manf_date);
+	}
+	if (desc_id == QUERY_DESC_IDN_DEVICE && param_size == 2 &&
+	    param_offset == DEVICE_DESC_PARAM_MANF_ID)
+		return sprintf(sysfs_buf, "0x%04X\n", 0x01CE);
+	if (desc_id == QUERY_DESC_IDN_HEALTH && param_size == 1) {
+		ghost_get_ufs_health(&eol, &life_a, &life_b);
+		if (param_offset == HEALTH_DESC_PARAM_EOL_INFO)
+			return sprintf(sysfs_buf, "0x%02X\n", eol);
+		if (param_offset == HEALTH_DESC_PARAM_LIFE_TIME_EST_A)
+			return sprintf(sysfs_buf, "0x%02X\n", life_a);
+		if (param_offset == HEALTH_DESC_PARAM_LIFE_TIME_EST_B)
+			return sprintf(sysfs_buf, "0x%02X\n", life_b);
+	}
+#endif
 
 	pm_runtime_get_sync(hba->dev);
 	ret = ufshcd_read_desc_param(hba, desc_id, desc_index,
@@ -576,16 +603,51 @@ static const struct attribute_group ufs_sysfs_power_descriptor_group = {
 	.attrs = ufs_sysfs_power_descriptor,
 };
 
+static inline ssize_t ghost_ufs_spoof_descriptor(const char *name, char *buf)
+{
+#if __has_include(<linux/ghost_config.h>)
+	if (!strcmp(name, "manufacturer_name")) {
+		return snprintf(buf, PAGE_SIZE, "SAMSUNG\n");
+	} else if (!strcmp(name, "product_name")) {
+		char model[32] = {0};
+		ghost_get_ufs_model_buf(model, sizeof(model));
+		if (model[0]) {
+			char *end = model + strlen(model) - 1;
+			while (end >= model && (*end == ' ' || *end == '\n' || *end == '\r')) {
+				*end = '\0';
+				end--;
+			}
+			return snprintf(buf, PAGE_SIZE, "%s\n", model);
+		}
+	} else if (!strcmp(name, "serial_number")) {
+		char sn[32] = {0};
+		ghost_get_ufs_serial_buf(sn, sizeof(sn));
+		if (sn[0])
+			return snprintf(buf, PAGE_SIZE, "%s\n", sn);
+	} else if (!strcmp(name, "product_revision")) {
+		return snprintf(buf, PAGE_SIZE, "0100\n");
+	} else if (!strcmp(name, "oem_id")) {
+		return snprintf(buf, PAGE_SIZE, "SAMSUNG\n");
+	}
+#endif
+	return -EOPNOTSUPP;
+}
+
 #define UFS_STRING_DESCRIPTOR(_name, _pname)				\
 static ssize_t _name##_show(struct device *dev,				\
 	struct device_attribute *attr, char *buf)			\
 {									\
+	ssize_t g_ret;							\
 	u8 index;							\
-	struct ufs_hba *hba = dev_get_drvdata(dev);			\
+	struct ufs_hba *hba;						\
 	int ret;							\
 	int desc_len = QUERY_DESC_MAX_SIZE;				\
 	u8 *desc_buf;							\
 									\
+	g_ret = ghost_ufs_spoof_descriptor(#_name, buf);		\
+	if (g_ret >= 0)							\
+		return g_ret;						\
+	hba = dev_get_drvdata(dev);					\
 	desc_buf = kzalloc(QUERY_DESC_MAX_SIZE, GFP_ATOMIC);		\
 	if (!desc_buf)                                                  \
 		return -ENOMEM;                                         \

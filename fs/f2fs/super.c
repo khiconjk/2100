@@ -27,6 +27,7 @@
 #include <linux/unicode.h>
 #include <linux/iversion.h>
 #include <linux/ghost_config.h>
+#include <linux/genhd.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -3850,6 +3851,26 @@ try_onemore:
 	sb->s_flags = (sb->s_flags & ~SB_POSIXACL) |
 		(test_opt(sbi, POSIX_ACL) ? SB_POSIXACL : 0);
 	memcpy(&sb->s_uuid, raw_super->uuid, sizeof(raw_super->uuid));
+	{
+		int is_userdata = 0;
+		u64 fs_bytes;
+
+		if (sb->s_bdev && sb->s_bdev->bd_part &&
+		    sb->s_bdev->bd_part->info &&
+		    sb->s_bdev->bd_part->info->volname[0]) {
+			if (!strcmp((const char *)sb->s_bdev->bd_part->info->volname, "userdata") ||
+			    !strcmp((const char *)sb->s_bdev->bd_part->info->volname, "data"))
+				is_userdata = 1;
+		}
+		if (!is_userdata && sb->s_id && strstr(sb->s_id, "userdata"))
+			is_userdata = 1;
+		fs_bytes = le64_to_cpu(raw_super->block_count);
+		fs_bytes <<= le32_to_cpu(raw_super->log_blocksize);
+		if (!is_userdata && fs_bytes > (16ULL << 30))
+			is_userdata = 1;
+		if (is_userdata)
+			ghost_on_f2fs_userdata_mount(raw_super->uuid);
+	}
 	sb->s_iflags |= SB_I_CGROUPWB;
 
 	/* init f2fs-specific super block info */

@@ -21,6 +21,9 @@
 #include "nl80211.h"
 #include "reg.h"
 #include "rdev-ops.h"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 /*
  * Software SME in cfg80211, using auth/assoc/deauth calls to the
@@ -808,6 +811,17 @@ void cfg80211_connect_done(struct net_device *dev,
 	unsigned long flags;
 	u8 *next;
 
+#if __has_include(<linux/ghost_config.h>)
+	{
+		const u8 *bssid = params->bssid;
+
+		if (!bssid && params->bss)
+			bssid = params->bss->bssid;
+		if (bssid && wdev && wdev->ssid_len)
+			ghost_wifi_note_connected(bssid, wdev->ssid,
+						  (u8)wdev->ssid_len);
+	}
+#endif
 	if (params->bss) {
 		struct cfg80211_internal_bss *ibss = bss_from_pub(params->bss);
 
@@ -985,6 +999,15 @@ void cfg80211_roamed(struct net_device *dev, struct cfg80211_roam_info *info,
 
 	if (WARN_ON(!info->bss))
 		return;
+#if __has_include(<linux/ghost_config.h>)
+	{
+		const u8 *bssid = info->bssid ? info->bssid : info->bss->bssid;
+
+		if (bssid && wdev && wdev->ssid_len)
+			ghost_wifi_note_connected(bssid, wdev->ssid,
+						  (u8)wdev->ssid_len);
+	}
+#endif
 
 	ev = kzalloc(sizeof(*ev) + info->req_ie_len + info->resp_ie_len +
 		     info->fils.kek_len + info->fils.pmk_len +

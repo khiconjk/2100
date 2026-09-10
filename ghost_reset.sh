@@ -249,11 +249,11 @@ if [ -n "$RESETPROP" ]; then
     fi
 
     # Synchronize Verified Boot Hash & Key properties
-    $RESETPROP -n ro.boot.vbmeta.digest "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781" 2>/dev/null
-    $RESETPROP -n ro.boot.boot_hash "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781" 2>/dev/null
-    $RESETPROP -n ro.boot.bootkey "78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95" 2>/dev/null
-    $RESETPROP -n ro.boot.verifiedbootkey "78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95" 2>/dev/null
-    $RESETPROP -n ro.boot.vbmeta.public_key_digest "78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95" 2>/dev/null
+    $RESETPROP -n ro.boot.vbmeta.digest "7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1" 2>/dev/null
+    $RESETPROP -n ro.boot.boot_hash "7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1" 2>/dev/null
+    $RESETPROP -n ro.boot.bootkey "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781" 2>/dev/null
+    $RESETPROP -n ro.boot.verifiedbootkey "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781" 2>/dev/null
+    $RESETPROP -n ro.boot.vbmeta.public_key_digest "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781" 2>/dev/null
     $RESETPROP -n ro.build.version.security_patch "2024-05-01" 2>/dev/null
     $RESETPROP -n ro.vendor.build.security_patch "2024-05-01" 2>/dev/null
     $RESETPROP -n gsm.operator.alpha "VIETTEL" 2>/dev/null

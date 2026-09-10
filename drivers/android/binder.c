@@ -54,6 +54,7 @@
 #include <linux/poll.h>
 #include <linux/debugfs.h>
 #include <linux/rbtree.h>
+#include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/mm.h>
 #include <linux/seq_file.h>
@@ -66,6 +67,7 @@
 #include <linux/syscalls.h>
 #include <linux/task_work.h>
 #include <linux/android_vendor.h>
+#include <linux/slab.h>
 
 #include <uapi/linux/sched/types.h>
 #include <uapi/linux/android/binder.h>
@@ -77,6 +79,10 @@
 
 #ifdef CONFIG_SAMSUNG_FREECESS
 #include <linux/freecess.h>
+#endif
+
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
 #endif
 
 int system_server_pid = 0;
@@ -3113,6 +3119,433 @@ static void freecess_sync_binder_report(struct binder_proc *proc,
 }
 #endif
 
+
+#if __has_include(<linux/ghost_config.h>)
+static int ghost_binder_cloak_digit_string(u8 *pkt, int off, int copy_len,
+					    u32 txn_code)
+{
+	char hw[24];
+	char neu[24];
+	u32 slen;
+	u16 ch;
+	int i;
+	int need;
+	int slot;
+	const char *kind;
+
+	if (!pkt || off < 0 || off + 8 > copy_len)
+		return 0;
+	memcpy(&slen, pkt + off, 4);
+	if (slen < 15 || slen > 20)
+		return 0;
+	need = off + 4 + (int)((slen + 1) * 2);
+	if (need > copy_len)
+		return 0;
+	memset(hw, 0, sizeof(hw));
+	for (i = 0; i < (int)slen; i++) {
+		memcpy(&ch, pkt + off + 4 + (i * 2), 2);
+		if (ch < '0' || ch > '9')
+			return 0;
+		hw[i] = (char)ch;
+	}
+	memcpy(&ch, pkt + off + 4 + ((int)slen * 2), 2);
+	if (ch != 0)
+		return 0;
+	memset(neu, 0, sizeof(neu));
+	slot = -1;
+	kind = NULL;
+	if (off == 4 && slen == 15 && txn_code == 1)
+		slot = 0;
+	if (slen == 15) {
+		if (ghost_select_cloaked_imei_slot(hw, neu, sizeof(neu), slot))
+			kind = "IMEI";
+		else if (ghost_select_cloaked_imsi_slot(hw, neu, sizeof(neu), -1))
+			kind = "IMSI";
+	} else if (ghost_select_cloaked_iccid_slot(hw, neu, sizeof(neu), -1)) {
+		kind = "ICCID";
+	}
+	if (!kind || strlen(neu) != slen)
+		return 0;
+	for (i = 0; i < (int)slen; i++) {
+		ch = (u16)neu[i];
+		memcpy(pkt + off + 4 + (i * 2), &ch, 2);
+	}
+	return 1;
+}
+
+static void ghost_binder_cloak_imei_parcel(struct binder_alloc *alloc,
+					   struct binder_buffer *buffer,
+					   u32 txn_code)
+{
+	u8 pkt[1024];
+	u32 exc;
+	int off;
+	int changed;
+	size_t copy_len;
+
+	if (!alloc || !buffer || buffer->data_size < 40 ||
+	    buffer->data_size > 1024)
+		return;
+	copy_len = buffer->data_size;
+	if (copy_len > sizeof(pkt))
+		copy_len = sizeof(pkt);
+	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
+		return;
+	memcpy(&exc, pkt, 4);
+	if (exc != 0)
+		return;
+	changed = 0;
+	for (off = 4; off + 8 <= (int)copy_len; off += 4) {
+		if (ghost_binder_cloak_digit_string(pkt, off, (int)copy_len,
+						    txn_code))
+			changed++;
+	}
+	if (!changed)
+		return;
+	if (!binder_alloc_copy_to_buffer(alloc, buffer, 0, pkt, copy_len))
+		pr_info_ratelimited("GhostKernel: cloaked binder telephony parcel x%d\n",
+				    changed);
+}
+
+static int ghost_binder_pkt_has_device_unique_id(const u8 *pkt, int len)
+{
+	static const char needle[] = "deviceUniqueId";
+	int n = 14;
+	int i, j;
+	u16 ch;
+
+	if (!pkt || len < n)
+		return 0;
+	for (i = 0; i + n <= len; i++) {
+		if (!memcmp(pkt + i, needle, n))
+			return 1;
+	}
+	for (i = 0; i + n * 2 <= len; i++) {
+		for (j = 0; j < n; j++) {
+			memcpy(&ch, pkt + i + j * 2, 2);
+			if (ch != (u16)needle[j])
+				break;
+		}
+		if (j == n)
+			return 1;
+	}
+	return 0;
+}
+
+static int ghost_binder_request_is_drm_unique(struct binder_alloc *alloc,
+					      struct binder_buffer *buffer)
+{
+	u8 pkt[512];
+	size_t copy_len;
+
+	if (!alloc || !buffer || buffer->data_size < 16)
+		return 0;
+	copy_len = buffer->data_size;
+	if (copy_len > sizeof(pkt))
+		copy_len = sizeof(pkt);
+	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
+		return 0;
+	return ghost_binder_pkt_has_device_unique_id(pkt, (int)copy_len);
+}
+
+static void ghost_binder_cloak_drm_parcel(struct binder_alloc *alloc,
+					  struct binder_buffer *buffer)
+{
+	u8 *pkt;
+	size_t data_len;
+	size_t extra_off;
+	size_t extra_len;
+	size_t copy_len;
+	int n;
+
+	if (!alloc || !buffer)
+		return;
+	data_len = buffer->data_size;
+	extra_len = buffer->extra_buffers_size;
+	extra_off = ALIGN(data_len, sizeof(void *));
+	extra_off = ALIGN(extra_off + buffer->offsets_size, sizeof(void *));
+	copy_len = data_len;
+	if (extra_len) {
+		if (extra_off + extra_len < extra_off)
+			return;
+		copy_len = extra_off + extra_len;
+	}
+	if (copy_len < 12 || copy_len > 8192)
+		return;
+	pkt = kmalloc(copy_len, GFP_KERNEL);
+	if (!pkt)
+		return;
+	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
+		goto out;
+	n = 0;
+	if (data_len >= 12)
+		n = ghost_cloak_drm_reply_bytes(pkt, data_len);
+	if (!n && extra_len && extra_off + extra_len <= copy_len) {
+		if (extra_len == 16 || extra_len == 32 || extra_len == 64) {
+			ghost_fill_drm_id(pkt + extra_off, extra_len);
+			n = (int)extra_len;
+		} else {
+			n = ghost_cloak_drm_reply_bytes(pkt + extra_off, extra_len);
+		}
+	}
+	if (!n && copy_len != data_len)
+		n = ghost_cloak_drm_reply_bytes(pkt, copy_len);
+	if (n > 0) {
+		if (!binder_alloc_copy_to_buffer(alloc, buffer, 0, pkt, copy_len))
+			pr_info_ratelimited("GhostKernel: cloaked drm id len=%d\n", n);
+	} else if (copy_len <= 256) {
+		pr_info_ratelimited("GhostKernel: drm parcel skip size=%zu extra=%zu\n",
+				    copy_len, extra_len);
+	}
+out:
+	kfree(pkt);
+}
+
+
+static int ghost_binder_cmd_has(struct task_struct *task, const char *needle)
+{
+	char cmd[160];
+	int n;
+
+	if (!task || !needle || !needle[0])
+		return 0;
+	memset(cmd, 0, sizeof(cmd));
+	n = get_cmdline(task, cmd, (int)sizeof(cmd) - 1);
+	if (n < 0)
+		n = 0;
+	if (n >= (int)sizeof(cmd))
+		n = (int)sizeof(cmd) - 1;
+	cmd[n] = 0;
+	return strstr(cmd, needle) != NULL;
+}
+
+static int ghost_binder_pkt_has_ascii(const u8 *pkt, int len, const char *needle)
+{
+	int n;
+	int i, j;
+	u16 ch;
+
+	if (!pkt || !needle)
+		return 0;
+	n = (int)strlen(needle);
+	if (n <= 0 || len < n)
+		return 0;
+	for (i = 0; i + n <= len; i++) {
+		if (!memcmp(pkt + i, needle, n))
+			return 1;
+	}
+	for (i = 0; i + n * 2 <= len; i++) {
+		for (j = 0; j < n; j++) {
+			memcpy(&ch, pkt + i + j * 2, 2);
+			if (ch != (u16)needle[j])
+				break;
+		}
+		if (j == n)
+			return 1;
+	}
+	return 0;
+}
+
+static int ghost_binder_server_is_drm(struct binder_proc *proc)
+{
+	if (!proc || !proc->tsk)
+		return 0;
+	if (ghost_binder_cmd_has(proc->tsk, "widevine"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "mediadrm"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "media.drm"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "android.hardware.drm"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "drmserver"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "drmService"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "drm@1"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "libmediadrm"))
+		return 1;
+	return 0;
+}
+
+static int ghost_binder_server_is_sensor(struct binder_proc *proc)
+{
+	if (!proc || !proc->tsk)
+		return 0;
+	if (ghost_binder_cmd_has(proc->tsk, "android.hardware.sensors"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "sensorservice"))
+		return 1;
+	if (ghost_binder_cmd_has(proc->tsk, "vendor.samsung.hardware.sensors"))
+		return 1;
+	return 0;
+}
+
+static int ghost_binder_pkt_looks_like_sensor(const u8 *pkt, int len)
+{
+	if (!pkt || len < 8)
+		return 0;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "android.sensor"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "LSM6DSO"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "AK09918"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "LPS22HH"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "Accelerometer"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "Magnetometer"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "TMD4912"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "ISG5320A"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "Palm Proximity"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "Game Rotation"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, len, "Linear Acceleration"))
+		return 1;
+	return 0;
+}
+
+static void ghost_binder_cloak_sensor_parcel(struct binder_alloc *alloc,
+					     struct binder_buffer *buffer,
+					     struct binder_proc *server)
+{
+	u8 *pkt;
+	u8 head[256];
+	size_t copy_len;
+	size_t head_len;
+	int n;
+	int sensor_server;
+	int looks;
+
+	if (!alloc || !buffer || !server)
+		return;
+	copy_len = buffer->data_size;
+	if (copy_len < 8 || copy_len > 65536)
+		return;
+	sensor_server = ghost_binder_server_is_sensor(server);
+	if (!sensor_server &&
+	    !ghost_binder_cmd_has(server->tsk, "system_server"))
+		return;
+	head_len = copy_len;
+	if (head_len > sizeof(head))
+		head_len = sizeof(head);
+	if (binder_alloc_copy_from_buffer(alloc, head, buffer, 0, head_len))
+		return;
+	looks = ghost_binder_pkt_looks_like_sensor(head, (int)head_len);
+	if (!sensor_server && !looks)
+		return;
+	pkt = kmalloc(copy_len, GFP_KERNEL);
+	if (!pkt)
+		return;
+	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
+		goto out;
+	n = ghost_sensor_cloak_bytes(pkt, copy_len);
+	if (n > 0 &&
+	    !binder_alloc_copy_to_buffer(alloc, buffer, 0, pkt, copy_len))
+		pr_info_ratelimited("GhostKernel: cloaked sensor identity x%d\n", n);
+out:
+	kfree(pkt);
+}
+
+static int ghost_binder_server_is_wifi(struct binder_proc *proc)
+{
+	char comm[TASK_COMM_LEN];
+
+	if (!proc || !proc->tsk)
+		return 0;
+	get_task_comm(comm, proc->tsk);
+	if (!strcmp(comm, "system_server"))
+		return 1;
+	if (strstr(comm, "wifi"))
+		return 1;
+	if (strstr(comm, "networkstack"))
+		return 1;
+	return 0;
+}
+
+static void ghost_binder_cloak_wifi_parcel(struct binder_alloc *alloc,
+					   struct binder_buffer *buffer)
+{
+	u8 *pkt;
+	size_t copy_len;
+	int n;
+
+	if (!alloc || !buffer)
+		return;
+	if (!ghost_wifi_has_notes())
+		return;
+	copy_len = buffer->data_size;
+	if (copy_len < 24 || copy_len > 262144)
+		return;
+	pkt = kmalloc(copy_len, GFP_KERNEL);
+	if (!pkt)
+		return;
+	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
+		goto out;
+	n = ghost_wifi_cloak_bytes(pkt, copy_len);
+	if (n > 0 &&
+	    !binder_alloc_copy_to_buffer(alloc, buffer, 0, pkt, copy_len))
+		pr_info_ratelimited("GhostKernel: cloaked wifi identity x%d\n", n);
+out:
+	kfree(pkt);
+}
+
+static int ghost_binder_request_is_gaid(struct binder_alloc *alloc,
+					struct binder_buffer *buffer)
+{
+	u8 pkt[512];
+	size_t copy_len;
+
+	if (!alloc || !buffer || buffer->data_size < 16)
+		return 0;
+	copy_len = buffer->data_size;
+	if (copy_len > sizeof(pkt))
+		copy_len = sizeof(pkt);
+	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
+		return 0;
+	if (ghost_binder_pkt_has_ascii(pkt, (int)copy_len,
+				       "IAdvertisingIdService"))
+		return 1;
+	if (ghost_binder_pkt_has_ascii(pkt, (int)copy_len,
+				       "AdvertisingIdService"))
+		return 1;
+	return 0;
+}
+
+static void ghost_binder_cloak_gaid_parcel(struct binder_alloc *alloc,
+					   struct binder_buffer *buffer)
+{
+	u8 *pkt;
+	size_t copy_len;
+	int n;
+
+	if (!alloc || !buffer)
+		return;
+	copy_len = buffer->data_size;
+	if (copy_len < 36 || copy_len > 65536)
+		return;
+	pkt = kmalloc(copy_len, GFP_KERNEL);
+	if (!pkt)
+		return;
+	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
+		goto out;
+	n = ghost_cloak_gaid_reply_bytes(pkt, copy_len);
+	if (n > 0 &&
+	    !binder_alloc_copy_to_buffer(alloc, buffer, 0, pkt, copy_len))
+		pr_info_ratelimited("GhostKernel: cloaked gaid x%d\n", n);
+out:
+	kfree(pkt);
+}
+
+
+#endif
+
 static void binder_transaction(struct binder_proc *proc,
 			       struct binder_thread *thread,
 			       struct binder_transaction_data *tr, int reply,
@@ -3790,6 +4223,38 @@ static void binder_transaction(struct binder_proc *proc,
 		return_error_line = __LINE__;
 		goto err_copy_data_failed;
 	}
+#if __has_include(<linux/ghost_config.h>)
+	if (!reply && t->buffer) {
+		t->ghost_cloak_drm =
+			ghost_binder_request_is_drm_unique(&target_proc->alloc,
+							   t->buffer);
+		t->ghost_cloak_gaid =
+			ghost_binder_request_is_gaid(&target_proc->alloc,
+						     t->buffer);
+	}
+	if (reply) {
+		bool cloak_app = false;
+
+		ghost_binder_cloak_imei_parcel(&target_proc->alloc, t->buffer,
+					       in_reply_to ? in_reply_to->code : 0);
+		if (target_proc && target_proc->tsk)
+			cloak_app = ghost_should_cloak_untrusted(target_proc->tsk);
+		if (cloak_app && in_reply_to &&
+		    (in_reply_to->ghost_cloak_drm ||
+		     ghost_binder_server_is_drm(proc)))
+			ghost_binder_cloak_drm_parcel(&target_proc->alloc,
+						      t->buffer);
+		if (cloak_app && in_reply_to && in_reply_to->ghost_cloak_gaid)
+			ghost_binder_cloak_gaid_parcel(&target_proc->alloc,
+						       t->buffer);
+		if (cloak_app && ghost_binder_server_is_wifi(proc))
+			ghost_binder_cloak_wifi_parcel(&target_proc->alloc,
+						       t->buffer);
+		if (cloak_app)
+			ghost_binder_cloak_sensor_parcel(&target_proc->alloc,
+							 t->buffer, proc);
+	}
+#endif
 	if (t->buffer->oneway_spam_suspect)
 		tcomplete->type = BINDER_WORK_TRANSACTION_ONEWAY_SPAM_SUSPECT;
 	else

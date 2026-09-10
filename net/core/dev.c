@@ -89,6 +89,7 @@
 #include <linux/if_ether.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/ghost_config.h>
 #include <linux/ethtool.h>
 #include <linux/skbuff.h>
 #include <linux/kthread.h>
@@ -8631,6 +8632,7 @@ int dev_get_mac_address(struct sockaddr *sa, struct net *net, char *dev_name)
 	size_t size = sizeof(sa->sa_data);
 	struct net_device *dev;
 	int ret = 0;
+	unsigned int addr_len = 0;
 
 	down_read(&dev_addr_sem);
 	rcu_read_lock();
@@ -8640,6 +8642,7 @@ int dev_get_mac_address(struct sockaddr *sa, struct net *net, char *dev_name)
 		ret = -ENODEV;
 		goto unlock;
 	}
+	addr_len = dev->addr_len;
 	if (!dev->addr_len)
 		memset(sa->sa_data, 0, size);
 	else
@@ -8650,6 +8653,9 @@ int dev_get_mac_address(struct sockaddr *sa, struct net *net, char *dev_name)
 unlock:
 	rcu_read_unlock();
 	up_read(&dev_addr_sem);
+	if (!ret && addr_len == ETH_ALEN)
+		ghost_copy_eth_addr_cloaked((u8 *)sa->sa_data,
+					     (u8 *)sa->sa_data, ETH_ALEN);
 	return ret;
 }
 EXPORT_SYMBOL(dev_get_mac_address);

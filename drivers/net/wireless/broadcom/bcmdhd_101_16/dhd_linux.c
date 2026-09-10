@@ -44,6 +44,10 @@
 #include <linux/inetdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/etherdevice.h>
+
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 #include <linux/random.h>
 #include <linux/spinlock.h>
 #include <linux/ethtool.h>
@@ -10405,6 +10409,9 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 #ifdef GET_CUSTOM_MAC_ENABLE
 	ret = wifi_platform_get_mac_addr(dhd->info->adapter, ea_addr.octet);
 	if (!ret) {
+#if __has_include(<linux/ghost_config.h>)
+		ghost_copy_wifi_mac(ea_addr.octet);
+#endif
 		ret = dhd_iovar(dhd, 0, "cur_etheraddr", (char *)&ea_addr, ETHER_ADDR_LEN, NULL, 0,
 				TRUE);
 		if (ret < 0) {
@@ -10424,6 +10431,9 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 			goto done;
 		}
 
+#if __has_include(<linux/ghost_config.h>)
+		ghost_copy_wifi_mac((u8 *)&buf);
+#endif
 		DHD_ERROR(("%s: use firmware generated mac_address "MACDBG"\n",
 			__FUNCTION__, MAC2STRDBG(&buf)));
 
@@ -10446,6 +10456,18 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 	} else {
 		(void)memcpy_s(dhd_linux_get_primary_netdev(dhd)->perm_addr, ETHER_ADDR_LEN,
 			dhd->mac.octet, ETHER_ADDR_LEN);
+#if __has_include(<linux/ghost_config.h>)
+		{
+			u8 gmac[ETH_ALEN];
+
+			ghost_copy_wifi_mac(gmac);
+			memcpy(dhd->mac.octet, gmac, ETHER_ADDR_LEN);
+			(void)memcpy_s(dhd_linux_get_primary_netdev(dhd)->perm_addr,
+				       ETHER_ADDR_LEN, gmac, ETHER_ADDR_LEN);
+			(void)dhd_iovar(dhd, 0, "cur_etheraddr", (char *)gmac,
+					ETHER_ADDR_LEN, NULL, 0, TRUE);
+		}
+#endif
 	}
 
 	if ((ret = dhd_apply_default_clm(dhd, clm_path)) < 0) {
@@ -11232,6 +11254,9 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef GET_CUSTOM_MAC_ENABLE
 	ret = wifi_platform_get_mac_addr(dhd->info->adapter, ea_addr.octet);
 	if (!ret) {
+#if __has_include(<linux/ghost_config.h>)
+		ghost_copy_wifi_mac(ea_addr.octet);
+#endif
 		ret = dhd_iovar(dhd, 0, "cur_etheraddr", (char *)&ea_addr, ETHER_ADDR_LEN, NULL, 0,
 				TRUE);
 		if (ret < 0) {
@@ -11251,6 +11276,9 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 			goto done;
 		}
 
+#if __has_include(<linux/ghost_config.h>)
+		ghost_copy_wifi_mac((u8 *)&buf);
+#endif
 		DHD_ERROR(("%s: use firmware generated mac_address "MACDBG"\n",
 			__FUNCTION__, MAC2STRDBG(&buf)));
 
@@ -11273,6 +11301,18 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	} else {
 		(void)memcpy_s(dhd_linux_get_primary_netdev(dhd)->perm_addr, ETHER_ADDR_LEN,
 			dhd->mac.octet, ETHER_ADDR_LEN);
+#if __has_include(<linux/ghost_config.h>)
+		{
+			u8 gmac[ETH_ALEN];
+
+			ghost_copy_wifi_mac(gmac);
+			memcpy(dhd->mac.octet, gmac, ETHER_ADDR_LEN);
+			(void)memcpy_s(dhd_linux_get_primary_netdev(dhd)->perm_addr,
+				       ETHER_ADDR_LEN, gmac, ETHER_ADDR_LEN);
+			(void)dhd_iovar(dhd, 0, "cur_etheraddr", (char *)gmac,
+					ETHER_ADDR_LEN, NULL, 0, TRUE);
+		}
+#endif
 	}
 #if defined(WL_STA_ASSOC_RAND) && defined(WL_STA_INIT_RAND)
 	/* Set cur_etheraddr of primary interface to randomized address to ensure

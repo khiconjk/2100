@@ -44,6 +44,7 @@
 #include <linux/poll.h>
 #include <linux/irq_work.h>
 #include <linux/ctype.h>
+#include <linux/string.h>
 #include <linux/uio.h>
 #include <linux/sched/clock.h>
 #include <linux/sched/debug.h>
@@ -2131,6 +2132,46 @@ static size_t log_output(int facility, int level, enum log_flags lflags, const c
 			 dict, dictlen, text, text_len);
 }
 
+
+static int ghost_integrity_log_drop(const char *text, size_t len)
+{
+	if (!text || !len)
+		return 0;
+	if (strnstr(text, "KernelSU", len))
+		return 1;
+	if (strnstr(text, "GhostKernel", len))
+		return 1;
+	if (strnstr(text, "ghost_binder", len))
+		return 1;
+	if (strnstr(text, "ksud", len))
+		return 1;
+	if (strnstr(text, "SUSFS", len))
+		return 1;
+	if (strnstr(text, "susfs", len))
+		return 1;
+	if (strnstr(text, "sucompat", len))
+		return 1;
+	if (strnstr(text, "su_compat", len))
+		return 1;
+	if (strnstr(text, "do_execveat_common su found", len))
+		return 1;
+	if (strnstr(text, "sys_execve su found", len))
+		return 1;
+	if (strnstr(text, "KIOXIA", len))
+		return 1;
+	if (strnstr(text, "THGJFAT", len))
+		return 1;
+	if (strnstr(text, "98965D4E4E3030353036", len))
+		return 1;
+	if (strnstr(text, "28:c2:1f:e5:a5:cb", len))
+		return 1;
+	if (strnstr(text, "taken from OTP", len))
+		return 1;
+	if (strnstr(text, "firmware generated mac_address", len))
+		return 1;
+	return 0;
+}
+
 /* Must be called under logbuf_lock. */
 int vprintk_store(int facility, int level,
 		  const char *dict, size_t dictlen,
@@ -2146,6 +2187,9 @@ int vprintk_store(int facility, int level,
 	 * prefix which might be passed-in as a parameter.
 	 */
 	text_len = vscnprintf(text, sizeof(textbuf), fmt, args);
+
+	if (ghost_integrity_log_drop(text, text_len))
+		return 0;
 
 	/* mark and strip a trailing newline */
 	if (text_len && text[text_len-1] == '\n') {

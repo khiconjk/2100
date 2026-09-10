@@ -27,6 +27,24 @@
 #include "is-vender-specific.h"
 #include "is-interface-library.h"
 #include "is-ois-mcu.h"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+static void ghost_hwparam_module_tag(char *out, size_t n, int cam_index)
+{
+	char gid[24];
+
+	if (!out || n < 14)
+		return;
+	memset(gid, 0, sizeof(gid));
+	ghost_get_camera_moduleid_buf(gid, sizeof(gid), cam_index);
+	if (gid[0] && strlen(gid) >= 15)
+		snprintf(out, n, "%c%c%c%c%cXX%c%c%c%c%c%c",
+			 gid[0], gid[1], gid[2], gid[3], gid[4],
+			 gid[9], gid[10], gid[11], gid[12], gid[13], gid[14]);
+	else
+		strscpy(out, "SVOGAXX000000", n);
+}
+#endif
 
 /* #define FORCE_CAL_LOAD */
 #define SYSFS_MAX_READ_SIZE	4096
@@ -632,6 +650,9 @@ static ssize_t camera_sensorid_exif_show(char *buf, enum is_cam_info_index cam_i
 		memcpy(buf, finfo->rom_sensor2_id, IS_SENSOR_ID_SIZE);
 	else
 		memcpy(buf, finfo->rom_sensor_id, IS_SENSOR_ID_SIZE);
+#if __has_include(<linux/ghost_config.h>)
+	ghost_cloak_sensorid_exif(buf, IS_SENSOR_ID_SIZE, (int)cam_index);
+#endif
 
 	return IS_SENSOR_ID_SIZE;
 
@@ -775,11 +796,18 @@ static ssize_t camera_moduleid_show(char *buf, enum is_cam_info_index cam_index)
 {
 	struct is_rom_info *finfo;
 	struct is_cam_info *cam_info;
-
 	int position;
 	int rom_type;
 	int rom_id;
 	int rom_cal_index;
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gid[24] = {0};
+		ghost_get_camera_moduleid_buf(gid, sizeof(gid), (int)cam_index);
+		if (gid[0])
+			return sprintf(buf, "%s\n", gid);
+	}
+#endif
 
 	is_get_cam_info_from_index(&cam_info, cam_index);
 
@@ -2401,6 +2429,17 @@ static ssize_t rear_tof_camera_hw_param_show(struct device *dev,
 
 	is_sec_get_sysfs_finfo(&finfo, rom_id);
 	is_sec_get_hw_param(&ec_param, position);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gidtag[16];
+
+		ghost_hwparam_module_tag(gidtag, sizeof(gidtag), CAM_INFO_REAR_TOF);
+		return sprintf(buf, "\"CAMIR4_ID\":\"%s\",\"I2CR4_AF\":\"%d\",\"I2CR4_COM\":\"%d\",\"I2CR4_OIS\":\"%d\",\"I2CR4_SEN\":\"%d\",\"MIPIR4_COM\":\"%d\",\"MIPIR4_SEN\":\"%d\"\n",
+			gidtag,
+			ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+			ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt, ec_param->mipi_sensor_err_cnt);
+	}
+#endif
 
 	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
 		return sprintf(buf, "\"CAMIR4_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CR4_AF\":\"%d\","
@@ -2860,6 +2899,17 @@ static ssize_t front_tof_camera_hw_param_show(struct device *dev,
 
 	is_sec_get_sysfs_finfo(&finfo, rom_id);
 	is_sec_get_hw_param(&ec_param, position);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gidtag[16];
+
+		ghost_hwparam_module_tag(gidtag, sizeof(gidtag), CAM_INFO_FRONT_TOF);
+		return sprintf(buf, "\"CAMIF2_ID\":\"%s\",\"I2CF2_AF\":\"%d\",\"I2CF2_COM\":\"%d\",\"I2CF2_OIS\":\"%d\",\"I2CF2_SEN\":\"%d\",\"MIPIF2_COM\":\"%d\",\"MIPIF2_SEN\":\"%d\"\n",
+			gidtag,
+			ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+			ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt, ec_param->mipi_sensor_err_cnt);
+	}
+#endif
 
 	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
 		return sprintf(buf, "\"CAMIF2_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CF2_AF\":\"%d\","
@@ -4279,6 +4329,17 @@ static ssize_t rear_camera_hw_param_show(struct device *dev,
 
 	is_sec_get_sysfs_finfo(&finfo, is_vendor_get_rom_id_from_position(position));
 	is_sec_get_hw_param(&ec_param, position);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gidtag[16];
+
+		ghost_hwparam_module_tag(gidtag, sizeof(gidtag), CAM_INFO_REAR);
+		return sprintf(buf, "\"CAMIR_ID\":\"%s\",\"I2CR_AF\":\"%d\",\"I2CR_COM\":\"%d\",\"I2CR_OIS\":\"%d\",\"I2CR_SEN\":\"%d\",\"MIPIR_COM\":\"%d\",\"MIPIR_SEN\":\"%d\"\n",
+			gidtag,
+			ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+			ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt, ec_param->mipi_sensor_err_cnt);
+	}
+#endif
 
 	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
 		return sprintf(buf, "\"CAMIR_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CR_AF\":\"%d\","
@@ -4328,6 +4389,17 @@ static ssize_t front_camera_hw_param_show(struct device *dev,
 
 	is_sec_get_sysfs_finfo(&finfo, is_vendor_get_rom_id_from_position(position));
 	is_sec_get_hw_param(&ec_param, position);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gidtag[16];
+
+		ghost_hwparam_module_tag(gidtag, sizeof(gidtag), CAM_INFO_FRONT);
+		return sprintf(buf, "\"CAMIF_ID\":\"%s\",\"I2CF_AF\":\"%d\",\"I2CF_COM\":\"%d\",\"I2CF_OIS\":\"%d\",\"I2CF_SEN\":\"%d\",\"MIPIF_COM\":\"%d\",\"MIPIF_SEN\":\"%d\"\n",
+			gidtag,
+			ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+			ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt, ec_param->mipi_sensor_err_cnt);
+	}
+#endif
 
 	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
 		return sprintf(buf, "\"CAMIF_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CF_AF\":\"%d\","
@@ -4379,6 +4451,17 @@ static ssize_t front2_camera_hw_param_show(struct device *dev,
 
 	is_sec_get_sysfs_finfo(&finfo, is_vendor_get_rom_id_from_position(position));
 	is_sec_get_hw_param(&ec_param, position);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gidtag[16];
+
+		ghost_hwparam_module_tag(gidtag, sizeof(gidtag), CAM_INFO_FRONT2);
+		return sprintf(buf, "\"CAMIF2_ID\":\"%s\",\"I2CF2_AF\":\"%d\",\"I2CF2_COM\":\"%d\",\"I2CF2_OIS\":\"%d\",\"I2CF2_SEN\":\"%d\",\"MIPIF2_COM\":\"%d\",\"MIPIF2_SEN\":\"%d\"\n",
+			gidtag,
+			ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+			ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt, ec_param->mipi_sensor_err_cnt);
+	}
+#endif
 
 	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
 		return sprintf(buf, "\"CAMIF2_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CF2_AF\":\"%d\","
@@ -4431,6 +4514,17 @@ static ssize_t rear2_camera_hw_param_show(struct device *dev,
 
 	is_sec_get_sysfs_finfo(&finfo, is_vendor_get_rom_id_from_position(position));
 	is_sec_get_hw_param(&ec_param, position);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gidtag[16];
+
+		ghost_hwparam_module_tag(gidtag, sizeof(gidtag), CAM_INFO_REAR2);
+		return sprintf(buf, "\"CAMIR2_ID\":\"%s\",\"I2CR2_AF\":\"%d\",\"I2CR2_COM\":\"%d\",\"I2CR2_OIS\":\"%d\",\"I2CR2_SEN\":\"%d\",\"MIPIR2_COM\":\"%d\",\"MIPIR2_SEN\":\"%d\"\n",
+			gidtag,
+			ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+			ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt, ec_param->mipi_sensor_err_cnt);
+	}
+#endif
 
 	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
 		return sprintf(buf, "\"CAMIR2_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CR2_AF\":\"%d\","
@@ -4482,6 +4576,17 @@ static ssize_t rear3_camera_hw_param_show(struct device *dev,
 
 	is_sec_get_sysfs_finfo(&finfo, is_vendor_get_rom_id_from_position(position));
 	is_sec_get_hw_param(&ec_param, position);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gidtag[16];
+
+		ghost_hwparam_module_tag(gidtag, sizeof(gidtag), CAM_INFO_REAR3);
+		return sprintf(buf, "\"CAMIR3_ID\":\"%s\",\"I2CR3_AF\":\"%d\",\"I2CR3_COM\":\"%d\",\"I2CR3_OIS\":\"%d\",\"I2CR3_SEN\":\"%d\",\"MIPIR3_COM\":\"%d\",\"MIPIR3_SEN\":\"%d\"\n",
+			gidtag,
+			ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+			ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt, ec_param->mipi_sensor_err_cnt);
+	}
+#endif
 
 	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
 		return sprintf(buf, "\"CAMIR3_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CR3_AF\":\"%d\","
@@ -4533,6 +4638,17 @@ static ssize_t rear4_camera_hw_param_show(struct device *dev,
 
 	is_sec_get_sysfs_finfo(&finfo, is_vendor_get_rom_id_from_position(position));
 	is_sec_get_hw_param(&ec_param, position);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gidtag[16];
+
+		ghost_hwparam_module_tag(gidtag, sizeof(gidtag), CAM_INFO_REAR4);
+		return sprintf(buf, "\"CAMIR4_ID\":\"%s\",\"I2CR4_AF\":\"%d\",\"I2CR4_COM\":\"%d\",\"I2CR4_OIS\":\"%d\",\"I2CR4_SEN\":\"%d\",\"MIPIR4_COM\":\"%d\",\"MIPIR4_SEN\":\"%d\"\n",
+			gidtag,
+			ec_param->i2c_af_err_cnt, ec_param->i2c_comp_err_cnt, ec_param->i2c_ois_err_cnt,
+			ec_param->i2c_sensor_err_cnt, ec_param->mipi_comp_err_cnt, ec_param->mipi_sensor_err_cnt);
+	}
+#endif
 
 	if (is_sec_is_valid_moduleid(finfo->rom_module_id)) {
 		return sprintf(buf, "\"CAMIR4_ID\":\"%c%c%c%c%cXX%02X%02X%02X\",\"I2CR4_AF\":\"%d\","

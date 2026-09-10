@@ -9,6 +9,7 @@
 
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/device.h>
@@ -913,12 +914,25 @@ show_vpd_##_page(struct file *filp, struct kobject *kobj,	\
 	struct scsi_device *sdev = to_scsi_device(dev);			\
 	struct scsi_vpd *vpd_page;					\
 	int ret = -EINVAL;						\
+	unsigned char tmp[256];						\
+	int page = 0;							\
 									\
+	if (!strcmp(__stringify(vpd_##_page), "vpd_pg80"))		\
+		page = 0x80;						\
+	else if (!strcmp(__stringify(vpd_##_page), "vpd_pg83"))		\
+		page = 0x83;						\
 	rcu_read_lock();						\
 	vpd_page = rcu_dereference(sdev->vpd_##_page);			\
-	if (vpd_page)							\
-		ret = memory_read_from_buffer(buf, count, &off,		\
-				vpd_page->data, vpd_page->len);		\
+	if (vpd_page) {							\
+		size_t n = vpd_page->len;				\
+		if (n > sizeof(tmp))					\
+			n = sizeof(tmp);				\
+		memcpy(tmp, vpd_page->data, n);				\
+		rcu_read_unlock();					\
+		if (page)						\
+			ghost_cloak_vpd_page(page, tmp, n);		\
+		return memory_read_from_buffer(buf, count, &off, tmp, n); \
+	}								\
 	rcu_read_unlock();						\
 	return ret;							\
 }									\
@@ -941,8 +955,32 @@ static ssize_t show_inquiry(struct file *filep, struct kobject *kobj,
 	if (!sdev->inquiry)
 		return -EINVAL;
 
-	return memory_read_from_buffer(buf, count, &off, sdev->inquiry,
-				       sdev->inquiry_len);
+	{
+		unsigned char tmp[256];
+		size_t n = sdev->inquiry_len;
+		char model[32];
+		size_t mlen;
+		size_t i;
+
+		if (n > sizeof(tmp))
+			n = sizeof(tmp);
+		memcpy(tmp, sdev->inquiry, n);
+#if __has_include(<linux/ghost_config.h>)
+		if (n >= 36) {
+			memcpy(tmp + 8, "SAMSUNG ", 8);
+			memset(tmp + 16, ' ', 16);
+			memset(model, 0, sizeof(model));
+			ghost_get_ufs_model_buf(model, sizeof(model));
+			mlen = strlen(model);
+			if (mlen > 16)
+				mlen = 16;
+			for (i = 0; i < mlen; i++)
+				tmp[16 + i] = (unsigned char)model[i];
+			memcpy(tmp + 32, "0100", 4);
+		}
+#endif
+		return memory_read_from_buffer(buf, count, &off, tmp, n);
+	}
 }
 
 static struct bin_attribute dev_attr_inquiry = {
@@ -1062,6 +1100,14 @@ sdev_show_wwid(struct device *dev, struct device_attribute *attr,
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
 	ssize_t count;
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char wwid[40] = {0};
+		ghost_get_ufs_wwid_buf(wwid, sizeof(wwid));
+		if (wwid[0])
+			return snprintf(buf, PAGE_SIZE, "%s\n", wwid);
+	}
+#endif
 
 	count = scsi_vpd_lun_id(sdev, buf, PAGE_SIZE);
 	if (count > 0) {

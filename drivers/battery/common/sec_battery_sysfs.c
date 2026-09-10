@@ -11,8 +11,35 @@
  */
 #include "sec_battery.h"
 #include "sec_battery_sysfs.h"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 #if defined(CONFIG_SEC_ABC)
 #include <linux/sti/abc_common.h>
+#endif
+
+#if __has_include(<linux/ghost_config.h>)
+static int ghost_cisd_out(int idx, int orig)
+{
+	int v = orig;
+
+	if (idx == CISD_DATA_CYCLE)
+		v = (int)ghost_get_battery_cycle();
+	else if (idx == CISD_DATA_WIRE_COUNT)
+		v = (int)ghost_get_cable_count();
+	else if (idx == CISD_DATA_ASOC)
+		v = (int)ghost_get_battery_health();
+	else if (idx == CISD_DATA_FULL_COUNT)
+		v = (int)(ghost_get_battery_cycle() / 8U) + 1;
+	else if (idx == CISD_DATA_WIRELESS_COUNT)
+		v = (int)(ghost_get_active_unique_id() % 7ULL);
+	return v;
+}
+#else
+static int ghost_cisd_out(int idx, int orig)
+{
+	return orig;
+}
 #endif
 
 static struct device_attribute sec_battery_attrs[] = {
@@ -312,6 +339,16 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		{
 			char safe_batt_type[48];
 			char *p1, *p2;
+
+			memset(safe_batt_type, 0, sizeof(safe_batt_type));
+#if __has_include(<linux/ghost_config.h>)
+			ghost_get_batt_qr_buf(safe_batt_type, sizeof(safe_batt_type));
+#endif
+			if (safe_batt_type[0]) {
+				i += scnprintf(buf + i, PAGE_SIZE - i, "%s\n",
+					       safe_batt_type);
+				break;
+			}
 			strscpy(safe_batt_type, battery->batt_type, sizeof(safe_batt_type));
 			p1 = strchr(safe_batt_type, '+');
 			if (p1) {
@@ -658,6 +695,11 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 	}
 		break;
 	case FG_ASOC:
+#if __has_include(<linux/ghost_config.h>)
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%u\n",
+			       ghost_get_battery_health());
+		break;
+#else
 		value.intval = -1;
 		{
 			struct power_supply *psy_fg = NULL;
@@ -680,6 +722,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
 			       value.intval);
 		break;
+#endif
 	case AUTH:
 		break;
 	case CHG_CURRENT_ADC:
@@ -935,12 +978,16 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		break;
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 	case FG_CYCLE:
+#if __has_include(<linux/ghost_config.h>)
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%u\n", ghost_get_battery_cycle());
+#else
 		value.intval = SEC_BATTERY_CAPACITY_CYCLE;
 		psy_do_property(battery->pdata->fuelgauge_name, get,
 			POWER_SUPPLY_PROP_ENERGY_NOW, value);
 		value.intval = value.intval / 100;
 		dev_info(battery->dev, "fg cycle(%d)\n", value.intval);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", value.intval);
+#endif
 		break;
 	case FG_FULL_VOLTAGE:
 		{
@@ -958,14 +1005,34 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			break;
 		}
 	case FG_FULLCAPNOM:
+#if __has_include(<linux/ghost_config.h>)
+		{
+			u32 health = ghost_get_battery_health();
+			u32 nom = 4000;
+			u32 cloaked;
+
+			if (battery->pdata && battery->pdata->battery_full_capacity > 0)
+				nom = battery->pdata->battery_full_capacity;
+			if (health < 90 || health > 100)
+				health = 96;
+			cloaked = nom * health / 100;
+			cloaked += (u32)(ghost_get_active_unique_id() % 11ULL);
+			i += scnprintf(buf + i, PAGE_SIZE - i, "%u\n", cloaked);
+		}
+#else
 		value.intval =
 			SEC_BATTERY_CAPACITY_AGEDCELL;
 		psy_do_property(battery->pdata->fuelgauge_name, get,
 			POWER_SUPPLY_PROP_ENERGY_NOW, value);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", value.intval);
+#endif
 		break;
 	case BATTERY_CYCLE:
+#if __has_include(<linux/ghost_config.h>)
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%u\n", ghost_get_battery_cycle());
+#else
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", battery->batt_cycle);
+#endif
 		break;
 	case BATTERY_CYCLE_TEST:
 		break;
@@ -1361,11 +1428,11 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			int j = 0;
 			int size = 0;
 
-			snprintf(temp_buf, sizeof(temp_buf), "%d", pcisd->data[CISD_DATA_RESET_ALG]);
+			snprintf(temp_buf, sizeof(temp_buf), "%d", ghost_cisd_out(CISD_DATA_RESET_ALG, pcisd->data[CISD_DATA_RESET_ALG]));
 			size = sizeof(temp_buf) - strlen(temp_buf);
 
 			for (j = CISD_DATA_RESET_ALG + 1; j < CISD_DATA_MAX_PER_DAY; j++) {
-				snprintf(temp_buf+strlen(temp_buf), size, " %d", pcisd->data[j]);
+				snprintf(temp_buf+strlen(temp_buf), size, " %d", ghost_cisd_out(j, pcisd->data[j]));
 				size = sizeof(temp_buf) - strlen(temp_buf);
 			}
 			i += scnprintf(buf + i, PAGE_SIZE - i, "%s\n", temp_buf);
@@ -1379,13 +1446,13 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			int size = 0;
 
 			snprintf(temp_buf, sizeof(temp_buf), "\"%s\":\"%d\"",
-					cisd_data_str[CISD_DATA_RESET_ALG], pcisd->data[CISD_DATA_RESET_ALG]);
+					cisd_data_str[CISD_DATA_RESET_ALG], ghost_cisd_out(CISD_DATA_RESET_ALG, pcisd->data[CISD_DATA_RESET_ALG]));
 			size = sizeof(temp_buf) - strlen(temp_buf);
 
 			for (j = CISD_DATA_RESET_ALG + 1; j < CISD_DATA_MAX; j++) {
 				if (battery->pdata->ignore_cisd_index[j / 32] & (0x1 << (j % 32)))
 					continue;
-				snprintf(temp_buf+strlen(temp_buf), size, ",\"%s\":\"%d\"", cisd_data_str[j], pcisd->data[j]);
+				snprintf(temp_buf+strlen(temp_buf), size, ",\"%s\":\"%d\"", cisd_data_str[j], ghost_cisd_out(j, pcisd->data[j]));
 				size = sizeof(temp_buf) - strlen(temp_buf);
 			}
 			i += scnprintf(buf + i, PAGE_SIZE - i, "%s\n", temp_buf);
@@ -1407,7 +1474,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 				if (battery->pdata->ignore_cisd_index_d[(j - CISD_DATA_FULL_COUNT_PER_DAY) / 32] & (0x1 << ((j - CISD_DATA_FULL_COUNT_PER_DAY) % 32)))
 					continue;
 				snprintf(temp_buf+strlen(temp_buf), size, ",\"%s\":\"%d\"",
-				cisd_data_str_d[j-CISD_DATA_MAX], pcisd->data[j]);
+				cisd_data_str_d[j-CISD_DATA_MAX], ghost_cisd_out(j, pcisd->data[j]));
 				size = sizeof(temp_buf) - strlen(temp_buf);
 			}
 
@@ -1447,7 +1514,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		{
 			struct cisd *pcisd = &battery->cisd;
 			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-				pcisd->data[CISD_DATA_WIRE_COUNT]);
+				ghost_cisd_out(CISD_DATA_WIRE_COUNT, pcisd->data[CISD_DATA_WIRE_COUNT]));
 		}
 		break;
 	case CISD_WC_DATA:

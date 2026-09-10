@@ -39,6 +39,9 @@
 #include <linux/fcntl.h>
 #include <linux/fs.h>
 #include <linux/list.h>
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 #include <bcmiov.h>
 
 #ifdef DHD_USE_CISINFO_FROM_OTP
@@ -1303,6 +1306,14 @@ dhd_check_module_mac(dhd_pub_t *dhdp)
 			}
 #endif /* DHD_EXPORT_CNTL_FILE */
 			/* update MAC address */
+#if __has_include(<linux/ghost_config.h>)
+			{
+				uint8 gmac[ETHER_ADDR_LEN];
+
+				ghost_copy_wifi_mac(gmac);
+				memcpy(&g_cis_buf[idx], gmac, ETHER_ADDR_LEN);
+			}
+#endif
 			snprintf(otp_mac_buf, sizeof(otp_mac_buf), MAC_CUSTOM_FORMAT,
 				(uint32)g_cis_buf[idx], (uint32)g_cis_buf[idx + 1],
 				(uint32)g_cis_buf[idx + 2], (uint32)g_cis_buf[idx + 3],
@@ -1342,6 +1353,12 @@ dhd_check_module_mac(dhd_pub_t *dhdp)
 #endif /* !DHD_MAC_ADDR_EXPORT */
 	}
 
+#if __has_include(<linux/ghost_config.h>)
+	ghost_copy_wifi_mac(mac->octet);
+#ifdef DHD_MAC_ADDR_EXPORT
+	memcpy(&sysfs_mac_addr, mac, sizeof(sysfs_mac_addr));
+#endif
+#endif
 	if (_dhd_set_mac_address(dhd, 0, mac) == 0) {
 		DHD_INFO(("%s: MAC Address is set\n", __FUNCTION__));
 	} else {

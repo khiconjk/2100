@@ -66,6 +66,38 @@
 #include "ebitmap.h"
 #include "audit.h"
 
+#if __has_include(<linux/ghost_config.h>)
+bool ghost_selinux_relax_serialno_prop(const char *type_name);
+
+static void ghost_allow_serialno_prop_av(struct policydb *policydb,
+					 struct context *tcontext,
+					 u16 tclass, u16 orig_tclass,
+					 struct av_decision *avd,
+					 bool kernel_mapped)
+{
+	const char *tname;
+
+	if (!policydb || !tcontext || !avd || !tcontext->type)
+		return;
+	tname = sym_name(policydb, SYM_TYPES, tcontext->type - 1);
+	if (!ghost_selinux_relax_serialno_prop(tname))
+		return;
+	if (kernel_mapped) {
+		if (orig_tclass == SECCLASS_FILE ||
+		    orig_tclass == SECCLASS_DIR ||
+		    orig_tclass == SECCLASS_LNK_FILE ||
+		    orig_tclass == SECCLASS_CHR_FILE)
+			avd->allowed |= FILE__READ | FILE__GETATTR |
+					FILE__OPEN | FILE__MAP;
+		return;
+	}
+	avd->allowed |= string_to_av_perm(policydb, tclass, "read") |
+			string_to_av_perm(policydb, tclass, "getattr") |
+			string_to_av_perm(policydb, tclass, "open") |
+			string_to_av_perm(policydb, tclass, "map");
+}
+#endif
+
 /* Policy capability names */
 const char *selinux_policycap_names[__POLICYDB_CAPABILITY_MAX] = {
 	"network_peer_controls",
@@ -1152,6 +1184,10 @@ void security_compute_av(struct selinux_state *state,
 				  xperms);
 	map_decision(&state->ss->map, orig_tclass, avd,
 		     policydb->allow_unknown);
+#if __has_include(<linux/ghost_config.h>)
+	ghost_allow_serialno_prop_av(policydb, tcontext, tclass, orig_tclass,
+				     avd, true);
+#endif
 out:
 	read_unlock(&state->ss->policy_rwlock);
 	return;
@@ -1204,6 +1240,10 @@ void security_compute_av_user(struct selinux_state *state,
 
 	context_struct_compute_av(policydb, scontext, tcontext, tclass, avd,
 				  NULL);
+#if __has_include(<linux/ghost_config.h>)
+	ghost_allow_serialno_prop_av(policydb, tcontext, tclass, tclass,
+				     avd, false);
+#endif
  out:
 	read_unlock(&state->ss->policy_rwlock);
 	return;

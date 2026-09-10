@@ -245,12 +245,25 @@ static ssize_t unique_id_show(struct device *dev,
 static ssize_t lot_id_show(struct device *dev,
 			         struct device_attribute *attr, char *buf)
 {
+#if __has_include(<linux/ghost_config.h>)
+	u64 gid = ghost_get_active_unique_id();
+	if (gid)
+		return snprintf(buf, 14, "%08llX\n", (gid & EXYNOS_LOTID_MASK));
+#endif
 	return snprintf(buf, 14, "%08X\n", exynos_soc_info.lot_id);
 }
 
 static ssize_t lot_id2_show(struct device *dev,
 			         struct device_attribute *attr, char *buf)
 {
+#if __has_include(<linux/ghost_config.h>)
+	char lot[8];
+
+	memset(lot, 0, sizeof(lot));
+	ghost_get_chip_lot_buf(lot, sizeof(lot));
+	if (lot[0])
+		return snprintf(buf, 14, "%s\n", lot);
+#endif
 	return snprintf(buf, 14, "%s\n", exynos_soc_info.lot_id2);
 }
 
@@ -300,6 +313,11 @@ static const struct attribute_group *chipid_sysfs_groups[] = {
 static ssize_t SVC_AP_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
+#if __has_include(<linux/ghost_config.h>)
+	u64 gid = ghost_get_active_unique_id();
+	if (gid)
+		return snprintf(buf, 20, "%010llX\n", gid);
+#endif
 	return snprintf(buf, 20, "%010llX\n",
 			(exynos_soc_info.unique_id));
 }

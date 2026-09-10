@@ -10,6 +10,9 @@
 
 #include <linux/ctype.h>
 #include <linux/lcd.h>
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 #include "panel.h"
 #include "panel_drv.h"
@@ -645,6 +648,15 @@ static ssize_t manufacture_code_show(struct device *dev,
 	u8 code[5] = { 0, };
 	struct panel_info *panel_data;
 	struct panel_device *panel = dev_get_drvdata(dev);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gid[16] = {0};
+
+		ghost_get_panel_ddi_buf(gid, sizeof(gid));
+		if (gid[0])
+			return snprintf(buf, PAGE_SIZE, "%s\n", gid);
+	}
+#endif
 
 	if (panel == NULL) {
 		panel_err("panel is null\n");
@@ -672,6 +684,14 @@ static ssize_t cell_id_show(struct device *dev,
 	u8 date[PANEL_DATE_LEN] = { 0, }, coordinate[4] = { 0, };
 	struct panel_info *panel_data;
 	struct panel_device *panel = dev_get_drvdata(dev);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gid[32] = {0};
+		ghost_get_panel_cellid_buf(gid, sizeof(gid));
+		if (gid[0])
+			return snprintf(buf, PAGE_SIZE, "%s\n", gid);
+	}
+#endif
 
 	if (panel == NULL) {
 		panel_err("panel is null\n");
@@ -704,6 +724,14 @@ static ssize_t octa_id_show(struct device *dev,
 	struct panel_device *panel = dev_get_drvdata(dev);
 	int len = 0;
 	bool cell_id_exist = true;
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gid[32] = {0};
+		ghost_get_panel_octaid_buf(gid, sizeof(gid));
+		if (gid[0])
+			return snprintf(buf, PAGE_SIZE, "%s\n", gid);
+	}
+#endif
 
 	if (panel == NULL) {
 		panel_err("panel is null\n");
@@ -770,6 +798,13 @@ static ssize_t color_coordinate_show(struct device *dev,
 static ssize_t manufacture_date_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
+#if __has_include(<linux/ghost_config.h>)
+	int gy = 2022, gm = 1, gd = 1, gh = 12, gmin = 0;
+
+	ghost_get_panel_manufacture_date(&gy, &gm, &gd, &gh, &gmin);
+	return snprintf(buf, PAGE_SIZE, "%d, %d, %d, %d:%d\n",
+			gy, gm, gd, gh, gmin);
+#else
 	u16 year;
 	u8 month, day, hour, min, date[PANEL_DATE_LEN] = { 0, };
 	struct panel_info *panel_data;
@@ -792,6 +827,7 @@ static ssize_t manufacture_date_show(struct device *dev,
 	snprintf(buf, PAGE_SIZE, "%d, %d, %d, %d:%d\n",
 			year, month, day, hour, min);
 	return strlen(buf);
+#endif
 }
 
 static ssize_t brightness_table_show(struct device *dev,

@@ -26,6 +26,9 @@
 #include <linux/kobject.h>
 #include <linux/proc_fs.h>
 #include <linux/sysfs.h>
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 #include <osl.h>
 #include <dhd.h>
 #include <dhd_dbg.h>
@@ -484,7 +487,18 @@ static ssize_t
 show_mac_addr(struct dhd_info *dev, char *buf)
 {
 	ssize_t ret = 0;
+#if __has_include(<linux/ghost_config.h>)
+	{
+		u8 gmac[6];
 
+		ghost_copy_wifi_mac(gmac);
+		ret = scnprintf(buf, PAGE_SIZE - 1, MACF,
+			(uint32)gmac[0], (uint32)gmac[1],
+			(uint32)gmac[2], (uint32)gmac[3],
+			(uint32)gmac[4], (uint32)gmac[5]);
+		return ret;
+	}
+#endif
 	ret = scnprintf(buf, PAGE_SIZE - 1, MACF,
 		(uint32)sysfs_mac_addr.octet[0], (uint32)sysfs_mac_addr.octet[1],
 		(uint32)sysfs_mac_addr.octet[2], (uint32)sysfs_mac_addr.octet[3],

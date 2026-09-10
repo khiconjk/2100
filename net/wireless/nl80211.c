@@ -29,6 +29,17 @@
 #include "nl80211.h"
 #include "reg.h"
 #include "rdev-ops.h"
+#include <linux/ghost_config.h>
+
+static const u8 *ghost_nl80211_local_mac(const u8 *real, u8 *tmp)
+{
+	if (!real || !tmp)
+		return real;
+	memcpy(tmp, real, ETH_ALEN);
+	if (ghost_should_cloak_untrusted(current))
+		ghost_copy_wifi_mac(tmp);
+	return tmp;
+}
 
 static int nl80211_crypto_settings(struct cfg80211_registered_device *rdev,
 				   struct genl_info *info,
@@ -2026,6 +2037,7 @@ static int nl80211_send_wiphy(struct cfg80211_registered_device *rdev,
 	enum nl80211_band band;
 	struct ieee80211_channel *chan;
 	int i;
+	u8 gmac[ETH_ALEN];
 	const struct ieee80211_txrx_stypes *mgmt_stypes =
 				rdev->wiphy.mgmt_stypes;
 	u32 features;
@@ -2368,7 +2380,7 @@ static int nl80211_send_wiphy(struct cfg80211_registered_device *rdev,
 			goto nla_put_failure;
 
 		if (nla_put(msg, NL80211_ATTR_MAC, ETH_ALEN,
-			    rdev->wiphy.perm_addr))
+			    ghost_nl80211_local_mac(rdev->wiphy.perm_addr, gmac)))
 			goto nla_put_failure;
 
 		if (!is_zero_ether_addr(rdev->wiphy.addr_mask) &&
@@ -2385,7 +2397,9 @@ static int nl80211_send_wiphy(struct cfg80211_registered_device *rdev,
 
 			for (i = 0; i < rdev->wiphy.n_addresses; i++)
 				if (nla_put(msg, i + 1, ETH_ALEN,
-					    rdev->wiphy.addresses[i].addr))
+					    ghost_nl80211_local_mac(
+						    rdev->wiphy.addresses[i].addr,
+						    gmac)))
 					goto nla_put_failure;
 
 			nla_nest_end(msg, attr);
@@ -3316,6 +3330,7 @@ static int nl80211_send_iface(struct sk_buff *msg, u32 portid, u32 seq, int flag
 {
 	struct net_device *dev = wdev->netdev;
 	void *hdr;
+	u8 gmac[ETH_ALEN];
 
 	WARN_ON(cmd != NL80211_CMD_NEW_INTERFACE &&
 		cmd != NL80211_CMD_DEL_INTERFACE &&
@@ -3334,7 +3349,8 @@ static int nl80211_send_iface(struct sk_buff *msg, u32 portid, u32 seq, int flag
 	    nla_put_u32(msg, NL80211_ATTR_IFTYPE, wdev->iftype) ||
 	    nla_put_u64_64bit(msg, NL80211_ATTR_WDEV, wdev_id(wdev),
 			      NL80211_ATTR_PAD) ||
-	    nla_put(msg, NL80211_ATTR_MAC, ETH_ALEN, wdev_address(wdev)) ||
+	    nla_put(msg, NL80211_ATTR_MAC, ETH_ALEN,
+		    ghost_nl80211_local_mac(wdev_address(wdev), gmac)) ||
 	    nla_put_u32(msg, NL80211_ATTR_GENERATION,
 			rdev->devlist_generation ^
 			(cfg80211_rdev_list_generation << 2)) ||

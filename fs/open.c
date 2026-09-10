@@ -36,12 +36,23 @@
 #include <linux/susfs_def.h>
 #endif
 #include "internal.h"
+#include <linux/ghost_config.h>
 
 int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	struct file *filp)
 {
 	int ret;
 	struct iattr newattrs;
+
+	if (dentry && dentry->d_name.name) {
+		const char *dname = dentry->d_name.name;
+		const char *pname = NULL;
+
+		if (dentry->d_parent && dentry->d_parent->d_name.name)
+			pname = dentry->d_parent->d_name.name;
+		if (ghost_is_cloaked_efs_name(dname, pname))
+			return -EPERM;
+	}
 
 	/* Not pretty: "inode->i_size" shouldn't really be signed. But it is. */
 	if (length < 0)

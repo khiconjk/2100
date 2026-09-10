@@ -32,3 +32,6 @@ ghost-uptime-v100-project-handoff/
 Image
 boot_ramdisk
 vendor_ramdisk
+scratch/
+ANTIGRAVITY_*.md
+P2_WIDEVINE_DRM_ID_RESEARCH.md

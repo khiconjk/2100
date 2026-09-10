@@ -608,34 +608,52 @@ void ghost_sanitize_persistent_properties(char *buf, size_t count)
 	anchor_len = snprintf(anchor_str, sizeof(anchor_str), "%llu",
 			      (unsigned long long)(boottime.tv_sec + 90));
 
-	/* 1. Replace "reboot,factory_reset" with "reboot              " */
+	/* 1. Replace "reboot,factory_reset" with "reboot,kernel,normal" */
 	p = buf;
 	while (p < buf + count - 20) {
 		p = ghost_memmem(p, buf + count - p, "reboot,factory_reset", 20);
 		if (!p)
 			break;
-		memcpy(p, "reboot              ", 20);
+		memcpy(p, "reboot,kernel,normal", 20);
 		p += 20;
 	}
 
-	/* 2. Replace any remaining "factory_reset" with "reboot       " */
+	/* 2. Replace any remaining "factory_reset" with "reboot,kernel" */
 	p = buf;
 	while (p < buf + count - 13) {
 		p = ghost_memmem(p, buf + count - p, "factory_reset", 13);
 		if (!p)
 			break;
-		memcpy(p, "reboot       ", 13);
+		memcpy(p, "reboot,kernel", 13);
 		p += 13;
 	}
 
-	/* 3. Replace any "recovery" in boot reason with "reboot  " */
+	/* 3. Replace any "recovery" in boot reason with "watchdog" */
 	p = buf;
 	while (p < buf + count - 8) {
 		p = ghost_memmem(p, buf + count - p, "recovery", 8);
 		if (!p)
 			break;
-		memcpy(p, "reboot  ", 8);
+		memcpy(p, "watchdog", 8);
 		p += 8;
+	}
+
+	/* 3b. Collapse previous same-length cloaks that used space padding. */
+	p = buf;
+	while (p < buf + count - 20) {
+		p = ghost_memmem(p, buf + count - p, "reboot              ", 20);
+		if (!p)
+			break;
+		memcpy(p, "reboot,kernel,normal", 20);
+		p += 20;
+	}
+	p = buf;
+	while (p < buf + count - 13) {
+		p = ghost_memmem(p, buf + count - p, "reboot       ", 13);
+		if (!p)
+			break;
+		memcpy(p, "reboot,kernel", 13);
+		p += 13;
 	}
 
 	/* 4. Find persist.sys.boot.reason.history and align timestamp to btime */

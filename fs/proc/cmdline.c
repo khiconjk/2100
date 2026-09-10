@@ -43,6 +43,8 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 	/* 3. flash.locked: 0 -> 1 */
 	while ((p = strstr(buf, "androidboot.flash.locked=0")))
 		*(p + 25) = '1';
+	while ((p = strstr(buf, "androidboot.selinux=permissive")))
+		memcpy(p + 20, "enforcing ", 10);
 
 	/* 4. kg & kg.state */
 	while ((p = strstr(buf, "androidboot.kg=0x6"))) {
@@ -90,7 +92,7 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 
 	/* 6. Wipe ALL occurrences of factory_reset anywhere in cmdline */
 	while ((p = strstr(buf, "factory_reset"))) {
-		memcpy(p, "reboot       ", 13);
+		memcpy(p, "reboot,kernel", 13);
 	}
 
 	/* 7. Force ALL bootreason= to reboot */
@@ -118,9 +120,9 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 	/* 8. Align VBMeta digest, boot_hash, bootkey and verifiedbootkey */
 	{
 		const char *target_boot_hash = (prof && prof->boot_hash[0]) ?
-			prof->boot_hash : "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781";
+			prof->boot_hash : "7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1";
 		const char *target_boot_key = (prof && prof->boot_key[0]) ?
-			prof->boot_key : "78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95";
+			prof->boot_key : "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781";
 
 		p = buf;
 		while ((p = strstr(p, "androidboot.vbmeta.digest="))) {
@@ -262,6 +264,11 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 		}
 		p = val + 1;
 	}
+
+	/* Same-length cloak for lcdtype / panel id / snapQB / ulcnt / hashes. */
+#if __has_include(<linux/ghost_config.h>)
+	ghost_sanitize_bootargs(buf, strlen(buf) + 1);
+#endif
 }
 
 static int cmdline_proc_show(struct seq_file *m, void *v)
@@ -286,8 +293,8 @@ static int cmdline_proc_show(struct seq_file *m, void *v)
 #if __has_include(<linux/ghost_config.h>)
 			ghost_get_profile_snapshot(&snap);
 #endif
-			target_boot_hash = snap.boot_hash[0] ? snap.boot_hash : "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781";
-			target_boot_key = snap.boot_key[0] ? snap.boot_key : "78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95";
+			target_boot_hash = snap.boot_hash[0] ? snap.boot_hash : "7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1";
+			target_boot_key = snap.boot_key[0] ? snap.boot_key : "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781";
 			target_serialno = snap.serialno[0] ? snap.serialno : "R5CR0000000";
 			target_ap_serial = snap.ap_serial[0] ? snap.ap_serial : "0x979BE420021A";
 			target_em_did = snap.em_did[0] ? snap.em_did : "20979be420021a11";

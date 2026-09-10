@@ -23,6 +23,24 @@
 #include "nl80211.h"
 #include "wext-compat.h"
 #include "rdev-ops.h"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+static void ghost_cfg80211_note_bss_ies(const u8 *bssid, const u8 *ie, size_t ielen)
+{
+	const u8 *ssid_ie = NULL;
+
+	if (ie && ielen)
+		ssid_ie = cfg80211_find_ie(WLAN_EID_SSID, ie, ielen);
+	if (ssid_ie && ssid_ie[1] > 0 && ssid_ie[1] <= 32)
+		ghost_wifi_note_bss(bssid, ssid_ie + 2, ssid_ie[1]);
+	else
+		ghost_wifi_note_bss(bssid, NULL, 0);
+}
+#else
+static inline void ghost_cfg80211_note_bss_ies(const u8 *bssid, const u8 *ie, size_t ielen)
+{
+}
+#endif
 
 /**
  * DOC: BSS tree/list structure
@@ -1794,6 +1812,7 @@ cfg80211_inform_bss_data(struct wiphy *wiphy,
 					      ielen, NULL, gfp);
 	if (!res)
 		return NULL;
+	ghost_cfg80211_note_bss_ies(bssid, ie, ielen);
 	non_tx_data.tx_bss = res;
 	cfg80211_parse_mbssid_data(wiphy, data, ftype, bssid, tsf,
 				   beacon_interval, ie, ielen, &non_tx_data,
@@ -2014,6 +2033,8 @@ cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 
 	res = cfg80211_inform_single_bss_frame_data(wiphy, data, mgmt,
 						    len, gfp);
+	if (res)
+		ghost_cfg80211_note_bss_ies(mgmt->bssid, ie, ielen);
 	if (!res || !wiphy->support_mbssid ||
 	    !cfg80211_find_ie(WLAN_EID_MULTIPLE_BSSID, ie, ielen))
 		return res;

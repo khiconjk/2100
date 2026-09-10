@@ -497,24 +497,49 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		if (count > MAX_RW_COUNT)
 			count =  MAX_RW_COUNT;
 
-		/* Pillar 43: Ghost Kernel Hardware Serial In-Flight Virtualization */
+		/* Pillar 43: Ghost Kernel Hardware Serial & EFS In-Flight Virtualization */
 		if (file && file->f_path.dentry && file->f_path.dentry->d_name.name && pos) {
-			char active_sn[16] = {0};
-			ghost_get_active_serial_buf(active_sn, sizeof(active_sn));
-			if (strlen(active_sn) == 11) {
-				if ((!strcmp(file->f_path.dentry->d_name.name, "serial_no") &&
-				     file->f_path.dentry->d_parent &&
-				     !strcmp(file->f_path.dentry->d_parent->d_name.name, "FactoryApp")) ||
-				    !strcmp(file->f_path.dentry->d_name.name, "ghost_serial.txt")) {
-					char sn_with_nl[13];
-					snprintf(sn_with_nl, sizeof(sn_with_nl), "%s\n", active_sn);
-					return ghost_vfs_inject_string(buf, count, pos, sn_with_nl, 12);
-				}
-			}
+			const char *dname = file->f_path.dentry->d_name.name;
+			struct dentry *parent = file->f_path.dentry->d_parent;
+			const char *pname = parent ? parent->d_name.name : NULL;
+			char payload[40];
+			size_t plen = 0;
+
+			if (ghost_get_cloaked_efs_payload(dname, pname, payload,
+							  sizeof(payload), &plen))
+				return ghost_vfs_inject_string(buf, count, pos, payload, plen);
 		}
 
 		ret = __vfs_read(file, buf, count, pos);
 		if (ret > 0) {
+			if (file && file->f_path.dentry && file->f_path.dentry->d_name.name &&
+			    file->f_path.dentry->d_parent &&
+			    file->f_path.dentry->d_parent->d_name.name &&
+			    ret <= 16384) {
+				const char *rdname = file->f_path.dentry->d_name.name;
+				const char *rpname = file->f_path.dentry->d_parent->d_name.name;
+				char *kbuf;
+
+				if ((!strcmp(rpname, "FactoryApp") &&
+				     (!strcmp(rdname, "HwParamData") ||
+				      !strcmp(rdname, "HwPartInform") ||
+				      !strcmp(rdname, "jhist_nv") ||
+				      !strcmp(rdname, "gyro_cal_data"))) ||
+				    (!strcmp(rpname, "sec_efs") &&
+				     (!strcmp(rdname, "SVC") ||
+				      !strcmp(rdname, "!SVC") ||
+				      !strcmp(rdname, "SettingsBackup.json")))) {
+					kbuf = kmalloc(ret, GFP_KERNEL);
+					if (kbuf) {
+						if (!copy_from_user(kbuf, buf, ret)) {
+							ghost_sanitize_efs_blob(rdname, rpname,
+										kbuf, ret);
+							copy_to_user(buf, kbuf, ret);
+						}
+						kfree(kbuf);
+					}
+				}
+			}
 			if (file && file->f_path.dentry && ret <= 65536 &&
 			    strstr(file->f_path.dentry->d_name.name, "persistent_properties")) {
 				char *kbuf = kmalloc(ret, GFP_KERNEL);
@@ -672,6 +697,16 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 		if (count > MAX_RW_COUNT)
 			count =  MAX_RW_COUNT;
 		file_start_write(file);
+		if (file && file->f_path.dentry && file->f_path.dentry->d_name.name) {
+			const char *wdname = file->f_path.dentry->d_name.name;
+			struct dentry *wparent = file->f_path.dentry->d_parent;
+			const char *wpname = wparent ? wparent->d_name.name : NULL;
+
+			if (ghost_is_cloaked_efs_name(wdname, wpname)) {
+				file_end_write(file);
+				return count;
+			}
+		}
 		if (file && file->f_path.dentry && count <= 65536 &&
 		    strstr(file->f_path.dentry->d_name.name, "persistent_properties")) {
 			char *kbuf = kmalloc(count, GFP_KERNEL);

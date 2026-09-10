@@ -15,6 +15,9 @@
 #include <linux/net.h>
 #include <linux/siphash.h>
 #include <net/secure_seq.h>
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 #if IS_ENABLED(CONFIG_IPV6) || IS_ENABLED(CONFIG_INET)
 #include <linux/in6.h>
@@ -69,8 +72,13 @@ u32 secure_tcpv6_ts_off(const struct net *net,
 		return 0;
 
 	ts_secret_init();
+#if __has_include(<linux/ghost_config.h>)
+	return siphash(&combined, offsetofend(typeof(combined), daddr),
+		       &ts_secret) + (ghost_get_tcp_isn_offset() >> 8);
+#else
 	return siphash(&combined, offsetofend(typeof(combined), daddr),
 		       &ts_secret);
+#endif
 }
 EXPORT_SYMBOL(secure_tcpv6_ts_off);
 
@@ -93,6 +101,9 @@ u32 secure_tcpv6_seq(const __be32 *saddr, const __be32 *daddr,
 	net_secret_init();
 	hash = siphash(&combined, offsetofend(typeof(combined), dport),
 		       &net_secret);
+#if __has_include(<linux/ghost_config.h>)
+	hash += ghost_get_tcp_isn_offset();
+#endif
 	return seq_scale(hash);
 }
 EXPORT_SYMBOL(secure_tcpv6_seq);
@@ -125,8 +136,13 @@ u32 secure_tcp_ts_off(const struct net *net, __be32 saddr, __be32 daddr)
 		return 0;
 
 	ts_secret_init();
+#if __has_include(<linux/ghost_config.h>)
+	return siphash_2u32((__force u32)saddr, (__force u32)daddr,
+			    &ts_secret) + (ghost_get_tcp_isn_offset() >> 8);
+#else
 	return siphash_2u32((__force u32)saddr, (__force u32)daddr,
 			    &ts_secret);
+#endif
 }
 
 /* secure_tcp_seq_and_tsoff(a, b, 0, d) == secure_ipv4_port_ephemeral(a, b, d),
@@ -143,6 +159,9 @@ u32 secure_tcp_seq(__be32 saddr, __be32 daddr,
 	hash = siphash_3u32((__force u32)saddr, (__force u32)daddr,
 			    (__force u32)sport << 16 | (__force u32)dport,
 			    &net_secret);
+#if __has_include(<linux/ghost_config.h>)
+	hash += ghost_get_tcp_isn_offset();
+#endif
 	return seq_scale(hash);
 }
 EXPORT_SYMBOL_GPL(secure_tcp_seq);

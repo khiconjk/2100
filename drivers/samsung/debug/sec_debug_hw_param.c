@@ -19,6 +19,9 @@
 #include <soc/samsung/exynos-pm.h>
 
 #include "sec_debug_internal.h"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 /* maximum size of sysfs */
 #define DATA_SIZE 1024
@@ -73,10 +76,17 @@ static ssize_t secdbg_hprm_ap_info_show(struct device *dev,
 	u32 tmp = 0;
 	char lot_id[LOT_STRING_LEN + 1];
 	char val[32] = {0, };
+	int asv[5];
+	int ids[4];
+	int asb_ver;
+	int psite;
 
 	reverse_id_0 = chipid_reverse_value(exynos_soc_info.lot_id, 32);
 	tmp = (reverse_id_0 >> 11) & 0x1FFFFF;
 	chipid_dec_to_36(tmp, lot_id);
+#if __has_include(<linux/ghost_config.h>)
+	ghost_get_chip_lot_buf(lot_id, sizeof(lot_id));
+#endif
 
 	memset(val, 0, 32);
 	get_bk_item_val_as_string("RSTCNT", val);
@@ -108,12 +118,17 @@ static ssize_t secdbg_hprm_ap_info_show(struct device *dev,
 		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
 				"\"BIN\":\"%s\",", val);
 
+	asb_ver = id_get_asb_ver();
+	psite = id_get_product_line();
+#if __has_include(<linux/ghost_config.h>)
+	ghost_get_asb_psite(&asb_ver, &psite);
+#endif
 	info_size +=
 		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
-				"\"ASB\":\"%d\",", id_get_asb_ver());
+				"\"ASB\":\"%d\",", asb_ver);
 	info_size +=
 		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
-				"\"PSITE\":\"%d\",", id_get_product_line());
+				"\"PSITE\":\"%d\",", psite);
 	info_size +=
 		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
 				"\"LOT_ID\":\"%s\",", lot_id);
@@ -125,6 +140,37 @@ static ssize_t secdbg_hprm_ap_info_show(struct device *dev,
 		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
 				"\"VST_ADJUST\":\"%d\",", volt_vst_cal_bdata);
 #endif
+#if __has_include(<linux/ghost_config.h>)
+	ghost_get_asv_values(asv);
+	ghost_get_ids_values(ids);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"ASV_BIG\":\"%d\",", asv[0]);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"ASV_MID\":\"%d\",", asv[1]);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"ASV_LIT\":\"%d\",", asv[2]);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"ASV_G3D\":\"%d\",", asv[3]);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"ASV_MIF\":\"%d\",", asv[4]);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"IDS_BIG\":\"%d\",", ids[0]);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"IDS_MID\":\"%d\",", ids[1]);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"IDS_LIT\":\"%d\",", ids[2]);
+	info_size +=
+		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
+				"\"IDS_G3D\":\"%d\",", ids[3]);
+#else
 	info_size +=
 		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
 				"\"ASV_BIG\":\"%d\",", asv_ids_information(bg));
@@ -152,6 +198,7 @@ static ssize_t secdbg_hprm_ap_info_show(struct device *dev,
 	info_size +=
 		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
 				"\"IDS_G3D\":\"%d\",", asv_ids_information(gids));
+#endif
 
 	return info_size;
 }

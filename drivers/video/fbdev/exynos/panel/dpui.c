@@ -12,6 +12,9 @@
 #include <linux/export.h>
 #include "dpui.h"
 #include "panel_debug.h"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 #ifdef PANEL_PR_TAG
 #undef PANEL_PR_TAG
@@ -230,6 +233,21 @@ static int __get_dpui_field(enum dpui_key key, char *buf)
 		return snprintf(buf, MAX_DPUI_KEY_LEN + MAX_DPUI_VAL_LEN,
 			"\"%s\":\"%s\"", dpui_key_name[key], dpui.field[key].default_value);
 	}
+
+#if __has_include(<linux/ghost_config.h>)
+	{
+		char gid[40] = {0};
+		if (key == DPUI_KEY_CELLID)
+			ghost_get_panel_cellid_buf(gid, sizeof(gid));
+		else if (key == DPUI_KEY_OCTAID)
+			ghost_get_panel_octaid_buf(gid, sizeof(gid));
+		else if (key == DPUI_KEY_MAID_DATE)
+			ghost_get_panel_maid_date_buf(gid, sizeof(gid));
+		if (gid[0])
+			return snprintf(buf, MAX_DPUI_KEY_LEN + MAX_DPUI_VAL_LEN,
+				"\"%s\":\"%s\"", dpui_key_name[key], gid);
+	}
+#endif
 
 	return snprintf(buf, MAX_DPUI_KEY_LEN + MAX_DPUI_VAL_LEN,
 			"\"%s\":\"%s\"", dpui_key_name[key], dpui.field[key].buf);

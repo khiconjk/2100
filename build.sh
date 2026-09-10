@@ -47,7 +47,7 @@ case "$GHOST_REALTIME_MODE" in
         ;;
 esac
 
-GHOST_KERNEL_CMDLINE="androidboot.selinux=permissive loop.max_part=7 androidboot.vbmeta.device_state=locked androidboot.vbmeta.size=4096 androidboot.vbmeta.digest=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.boot_hash=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.bootkey=78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95 androidboot.verifiedbootkey=78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95 androidboot.vbmeta.public_key_digest=78d88bcb03734bebc53a14658b315a500f7c7488357dafe490d283cc726bff95 androidboot.vbmeta.avb_version=1.2 androidboot.vbmeta.hash_alg=sha256 $GHOST_REALTIME_CMDLINE_MODE"
+GHOST_KERNEL_CMDLINE="androidboot.selinux=permissive loop.max_part=7 androidboot.vbmeta.device_state=locked androidboot.vbmeta.size=4096 androidboot.vbmeta.digest=7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1 androidboot.boot_hash=7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1 androidboot.bootkey=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.verifiedbootkey=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.vbmeta.public_key_digest=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.vbmeta.avb_version=1.2 androidboot.vbmeta.hash_alg=sha256 $GHOST_REALTIME_CMDLINE_MODE"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

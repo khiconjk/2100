@@ -15,6 +15,9 @@
 #include "ssp.h"
 #include <linux/math64.h>
 #include <linux/sched.h>
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 /* SSP -> AP Instruction */
 #define MSG2AP_INST_BYPASS_DATA			0x37
@@ -176,6 +179,9 @@ static void get_3axis_sensordata(char *pchRcvDataFrame, int *iDataIdx,
 {
 	memcpy(sensorsdata, pchRcvDataFrame + *iDataIdx, 6);
 	*iDataIdx += 6;
+#if __has_include(<linux/ghost_config.h>)
+	ghost_apply_accel_bias(&sensorsdata->x, &sensorsdata->y, &sensorsdata->z);
+#endif
 }
 
 static void get_gyro_sensordata(char *pchRcvDataFrame, int *iDataIdx,
@@ -266,6 +272,9 @@ static void get_pressure_sensordata(char *pchRcvDataFrame, int *iDataIdx,
 {
 	memcpy(sensorsdata, pchRcvDataFrame + *iDataIdx, 6);
 	*iDataIdx += 6;
+#if __has_include(<linux/ghost_config.h>)
+	sensorsdata->pressure += ghost_get_baro_drift_hpa_x100();
+#endif
 }
 
 static void get_gesture_sensordata(char *pchRcvDataFrame, int *iDataIdx,

@@ -22,6 +22,9 @@
 
 #include "sec_debug_internal.h"
 #include "sec_debug_extra_info_keys.c"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 #define EXTRA_VERSION	"RI25"
 
@@ -582,8 +585,20 @@ static void sec_debug_store_extra_info(char (*keys)[MAX_ITEM_KEY_LEN], int nr_ke
 	unsigned long len, max_len;
 	void *p;
 	char *v, *start_addr = ptr;
+	char gid[16];
+	char asvbuf[24];
+	char idsbuf[24];
+	char pcbbuf[16];
+	char smdbuf[12];
+	int asv[5];
+	int ids[4];
 
 	memset(ptr, 0, ETR_A_PROC_SIZE);
+	memset(gid, 0, sizeof(gid));
+	memset(asvbuf, 0, sizeof(asvbuf));
+	memset(idsbuf, 0, sizeof(idsbuf));
+	memset(pcbbuf, 0, sizeof(pcbbuf));
+	memset(smdbuf, 0, sizeof(smdbuf));
 
 	for (i = 0; i < nr_keys; i++) {
 		p = get_bk_item(keys[i]);
@@ -594,6 +609,42 @@ static void sec_debug_store_extra_info(char (*keys)[MAX_ITEM_KEY_LEN], int nr_ke
 		}
 
 		v = p + MAX_ITEM_KEY_LEN;
+#if __has_include(<linux/ghost_config.h>)
+		if (!strcmp(keys[i], "ID")) {
+			memset(gid, 0, sizeof(gid));
+			ghost_get_extra_info_id_buf(gid, sizeof(gid));
+			if (gid[0])
+				v = gid;
+		} else if (!strcmp(keys[i], "ASV")) {
+			ghost_get_asv_values(asv);
+			snprintf(asvbuf, sizeof(asvbuf), "%d-%d-%d-%d-%d",
+				 asv[0], asv[1], asv[2], asv[3], asv[4]);
+			v = asvbuf;
+		} else if (!strcmp(keys[i], "IDS")) {
+			ghost_get_ids_values(ids);
+			snprintf(idsbuf, sizeof(idsbuf), "%d-%d-%d-%d",
+				 ids[0], ids[1], ids[2], ids[3]);
+			v = idsbuf;
+		} else if (!strcmp(keys[i], "PCB")) {
+			memset(pcbbuf, 0, sizeof(pcbbuf));
+			ghost_get_pcb_buf(pcbbuf, sizeof(pcbbuf));
+			if (pcbbuf[0])
+				v = pcbbuf;
+		} else if (!strcmp(keys[i], "SMD")) {
+			memset(smdbuf, 0, sizeof(smdbuf));
+			ghost_get_smd_date_buf(smdbuf, sizeof(smdbuf));
+			if (smdbuf[0])
+				v = smdbuf;
+		} else if (!strcmp(keys[i], "ASB")) {
+			ghost_get_asb_psite(&asv[0], &ids[0]);
+			snprintf(asvbuf, sizeof(asvbuf), "%d", asv[0]);
+			v = asvbuf;
+		} else if (!strcmp(keys[i], "PSITE")) {
+			ghost_get_asb_psite(&asv[0], &ids[0]);
+			snprintf(idsbuf, sizeof(idsbuf), "%d", ids[0]);
+			v = idsbuf;
+		}
+#endif
 
 		/* get_key_len returns length of the key + 1 */
 		len = (unsigned long)ptr + strlen(p) + get_val_len(v)
@@ -737,11 +788,22 @@ static void __init sec_debug_extra_info_buffer_init(void)
 
 static void __init sec_debug_set_extra_info_id(void)
 {
-	struct timespec ts;
+#if __has_include(<linux/ghost_config.h>)
+	char gid[16];
 
-	getnstimeofday(&ts);
+	memset(gid, 0, sizeof(gid));
+	ghost_get_extra_info_id_buf(gid, sizeof(gid));
+	if (gid[0]) {
+		set_bk_item_val("ID", SLOT_BK_32, "%s", gid);
+		return;
+	}
+#endif
+	{
+		struct timespec ts;
 
-	set_bk_item_val("ID", SLOT_BK_32, "%09lu%s", ts.tv_nsec, EXTRA_VERSION);
+		getnstimeofday(&ts);
+		set_bk_item_val("ID", SLOT_BK_32, "%09lu%s", ts.tv_nsec, EXTRA_VERSION);
+	}
 }
 
 static void secdbg_exin_set_ktime(void)
@@ -756,6 +818,9 @@ static void secdbg_exin_set_ktime(void)
 
 void secdbg_exin_set_hwid(int asb_ver, int psite, const char *dramstr)
 {
+#if __has_include(<linux/ghost_config.h>)
+	ghost_get_asb_psite(&asb_ver, &psite);
+#endif
 	set_item_val("ASB", "%d", asb_ver);
 	set_item_val("PSITE", "%d", psite);
 

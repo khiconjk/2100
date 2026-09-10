@@ -23,6 +23,10 @@
 
 #include <linux/module.h>
 #include <linux/netdevice.h>
+
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 #include <net/netlink.h>
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
@@ -4877,9 +4881,19 @@ static int wl_android_get_factory_mac_addr(struct net_device *ndev, char *comman
 			"is less than factory mac addr\n", total_len));
 		return BCME_ERROR;
 	}
+#if __has_include(<linux/ghost_config.h>)
+	{
+		u8 gmac[ETH_ALEN];
+
+		ghost_copy_wifi_mac(gmac);
+		ret = snprintf(command, total_len, MACDBG, MAC2STRDBG(gmac));
+		return ret;
+	}
+#else
 	ret = snprintf(command, total_len, MACDBG,
 		MAC2STRDBG(bcmcfg_to_prmry_ndev(cfg)->perm_addr));
 	return ret;
+#endif
 }
 
 #if defined(WLAN_ACCEL_BOOT)

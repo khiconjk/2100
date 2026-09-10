@@ -44,6 +44,10 @@
 #include <linux/netdevice.h>
 #include <linux/sched.h>
 #include <linux/etherdevice.h>
+
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 #include <linux/wireless.h>
 #include <linux/ieee80211.h>
 #include <linux/wait.h>
@@ -16311,6 +16315,14 @@ static s32 __wl_cfg80211_up(struct bcm_cfg80211 *cfg)
 
 	(void)memcpy_s(wdev->wiphy->perm_addr, ETHER_ADDR_LEN,
 		bcmcfg_to_prmry_ndev(cfg)->perm_addr, ETHER_ADDR_LEN);
+#if __has_include(<linux/ghost_config.h>)
+	{
+		u8 gmac[ETH_ALEN];
+
+		ghost_copy_wifi_mac(gmac);
+		(void)memcpy_s(wdev->wiphy->perm_addr, ETHER_ADDR_LEN, gmac, ETHER_ADDR_LEN);
+	}
+#endif
 	/* Always bring up interface in STA mode.
 	* Did observe , if previous SofAP Bringup/cleanup
 	* is not done properly, iftype is stuck with AP mode.

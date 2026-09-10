@@ -36,6 +36,7 @@
 #include <linux/if_vlan.h>
 #include <linux/pci.h>
 #include <linux/etherdevice.h>
+#include <linux/ghost_config.h>
 #include <linux/bpf.h>
 
 #include <linux/uaccess.h>
@@ -1721,7 +1722,14 @@ static int rtnl_fill_ifinfo(struct sk_buff *skb,
 		goto nla_put_failure;
 
 	if (dev->addr_len) {
-		if (nla_put(skb, IFLA_ADDRESS, dev->addr_len, dev->dev_addr) ||
+		const unsigned char *addr = dev->dev_addr;
+		unsigned char gmac[MAX_ADDR_LEN];
+
+		if (dev->addr_len == ETH_ALEN) {
+			ghost_copy_eth_addr_cloaked(gmac, dev->dev_addr, ETH_ALEN);
+			addr = gmac;
+		}
+		if (nla_put(skb, IFLA_ADDRESS, dev->addr_len, addr) ||
 		    nla_put(skb, IFLA_BROADCAST, dev->addr_len, dev->broadcast))
 			goto nla_put_failure;
 	}
@@ -4408,6 +4416,8 @@ int ndo_dflt_bridge_getlink(struct sk_buff *skb, u32 pid, u32 seq,
 	u8 operstate = netif_running(dev) ? dev->operstate : IF_OPER_DOWN;
 	struct net_device *br_dev = netdev_master_upper_dev_get(dev);
 	int err = 0;
+	unsigned char gmac[MAX_ADDR_LEN];
+	const unsigned char *addr;
 
 	nlh = nlmsg_put(skb, pid, seq, RTM_NEWLINK, sizeof(*ifm), nlflags);
 	if (nlh == NULL)
@@ -4421,6 +4431,11 @@ int ndo_dflt_bridge_getlink(struct sk_buff *skb, u32 pid, u32 seq,
 	ifm->ifi_flags = dev_get_flags(dev);
 	ifm->ifi_change = 0;
 
+	addr = dev->dev_addr;
+	if (dev->addr_len == ETH_ALEN) {
+		ghost_copy_eth_addr_cloaked(gmac, dev->dev_addr, ETH_ALEN);
+		addr = gmac;
+	}
 
 	if (nla_put_string(skb, IFLA_IFNAME, dev->name) ||
 	    nla_put_u32(skb, IFLA_MTU, dev->mtu) ||
@@ -4428,7 +4443,7 @@ int ndo_dflt_bridge_getlink(struct sk_buff *skb, u32 pid, u32 seq,
 	    (br_dev &&
 	     nla_put_u32(skb, IFLA_MASTER, br_dev->ifindex)) ||
 	    (dev->addr_len &&
-	     nla_put(skb, IFLA_ADDRESS, dev->addr_len, dev->dev_addr)) ||
+	     nla_put(skb, IFLA_ADDRESS, dev->addr_len, addr)) ||
 	    (dev->ifindex != dev_get_iflink(dev) &&
 	     nla_put_u32(skb, IFLA_LINK, dev_get_iflink(dev))))
 		goto nla_put_failure;

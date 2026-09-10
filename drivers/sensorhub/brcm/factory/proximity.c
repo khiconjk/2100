@@ -1,5 +1,6 @@
 #include "../ssp.h"
 #include "sensors.h"
+#include <linux/ghost_config.h>
 
 #define PROX_ADC_BITS_NUM		14
 #define THRESHOLD_HIGH			0
@@ -99,13 +100,13 @@ static u16 get_proximity_all_threshold(struct ssp_data *data, int threshold_type
 static ssize_t proximity_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%s\n",  get_prox(dev)->vendor);
+	return ghost_sysfs_print_sensor_text(buf, get_prox(dev)->vendor);
 }
 
 static ssize_t proximity_name_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%s\n",  get_prox(dev)->name);
+	return ghost_sysfs_print_sensor_text(buf, get_prox(dev)->name);
 }
 
 static ssize_t proximity_probe_show(struct device *dev,

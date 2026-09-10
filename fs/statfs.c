@@ -14,6 +14,9 @@
 #include "mount.h"
 #endif // #if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
 #include "internal.h"
+#if __has_include(<linux/ghost_config.h>)
+#include <linux/ghost_config.h>
+#endif
 
 static int flags_by_mnt(int mnt_flags)
 {
@@ -118,8 +121,12 @@ int vfs_statfs(const struct path *path, struct kstatfs *buf)
 			goto orig_flow;
 		}
 		error = statfs_by_dentry(no_sus_vfsmnt->mnt_root, buf);
-		if (!error)
+		if (!error) {
 			buf->f_flags = calculate_f_flags(no_sus_vfsmnt);
+#if __has_include(<linux/ghost_config.h>)
+			ghost_mask_fsid(buf->f_fsid.val);
+#endif
+		}
 		dput(no_sus_vfsmnt->mnt_root);
 		mntput(no_sus_vfsmnt);
 		return error;
@@ -131,8 +138,12 @@ orig_flow:
 #endif // #if defined(CONFIG_KSU_SUSFS_SUS_MOUNT) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
 
 	error = statfs_by_dentry(path->dentry, buf);
-	if (!error)
+	if (!error) {
 		buf->f_flags = calculate_f_flags(path->mnt);
+#if __has_include(<linux/ghost_config.h>)
+		ghost_mask_fsid(buf->f_fsid.val);
+#endif
+	}
 	return error;
 
 }
