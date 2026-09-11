@@ -1,25 +1,88 @@
-name: Build o1s Kernel
+name: Build o1s Ghost Full
+
+# Builds every in-tree Ghost kernel patch for Galaxy S21 (o1s) and packs
+# flashable VANILLA + KSUN+SuSFS artifacts (boot/vendor_boot/dtbo, TWRP zip,
+# ODIN tar.md5, ODIN LZ4 tar.md5, disabled vbmeta).
+#
+# Local usage: Actions > Build o1s Ghost Full > Run workflow.
+# Variants: all | vanilla | ksun-susfs
 
 on:
   workflow_dispatch:
+    inputs:
+      variant:
+        description: Kernel variant to build
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - vanilla
+          - ksun-susfs
   push:
     branches:
       - main
     paths:
-      - ".github/workflows/build-o1s.yml"
+      - ".github/workflows/**"
       - "build.sh"
-      - "arch/arm64/configs/**"
-      - "drivers/vibrator/**"
-      - "drivers/rtc/**"
-      - "kernel/**"
+      - "ghost.conf"
+      - "patches/**"
+      - "arch/**"
+      - "block/**"
+      - "certs/**"
+      - "crypto/**"
+      - "drivers/**"
       - "fs/**"
       - "include/**"
+      - "init/**"
+      - "ipc/**"
+      - "kernel/**"
+      - "lib/**"
+      - "mm/**"
+      - "net/**"
+      - "security/**"
+      - "sound/**"
+      - "virt/**"
       - "dt.configs/**"
+      - "build/ramdisk/**"
+      - "scripts/generate_ghost.py"
+      - "scripts/random_ghost.sh"
+
+concurrency:
+  group: o1s-kernel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: o1s ${{ matrix.variant }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: vanilla
+            ksu: "n"
+            susfs: "n"
+            label: VANILLA_GHOST_FULL
+          - variant: ksun-susfs
+            ksu: "y"
+            susfs: "y"
+            label: KSUN_SUSFS_GHOST_FULL
+    if: >
+      github.event_name != 'workflow_dispatch'
+      || github.event.inputs.variant == 'all'
+      || github.event.inputs.variant == matrix.variant
+
+    env:
+      MODEL: o1s
+      VARIANT: ${{ matrix.variant }}
+      KSU_OPTION: ${{ matrix.ksu }}
+      SUSFS_OPTION: ${{ matrix.susfs }}
+      LABEL: ${{ matrix.label }}
 
     steps:
       - name: Checkout source
@@ -30,65 +93,68 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/hostedtoolcache
+          set -euxo pipefail
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
           sudo apt-get clean
           df -h
 
       - name: Install dependencies
         run: |
+          set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
             git curl wget tar xz-utils zip unzip \
             build-essential bc bison flex \
             libssl-dev libelf-dev dwarves pahole \
             python3 python3-pip \
-            cpio lz4 gzip kmod rsync ca-certificates
+            cpio lz4 gzip kmod rsync ca-certificates patch
+
+      - name: Verify Ghost patch sources
+        run: |
+          set -euxo pipefail
+          echo "===== GHOST PATCH SOURCE CHECK ====="
+          test -f include/linux/ghost_procfs.h
+          test -f include/linux/ghost_config.h
+          test -f include/linux/ghost_uptime.h
+          test -f kernel/ghost_config.c
+          test -f kernel/ghost_uptime.c
+          test -f ghost.conf
+          test -f patches/enable-susfs.patch
+          test -f arch/arm64/configs/o1s.config
+          test -f arch/arm64/configs/ksu.config
+          test -f arch/arm64/configs/susfs.config
+          grep -q 'ghost_can_see_pid' fs/proc/base.c
+          grep -q 'androidboot.boot_hash=7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1' build.sh
+          grep -q 'androidboot.verifiedbootkey=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781' build.sh
+          echo "Ghost kernel sources and locked boot_hash/boot_key are present."
 
       - name: Hard clean old build outputs
         run: |
+          set -euxo pipefail
           echo "===== CLEAN OLD BUILD OUTPUTS ====="
-
-          rm -rf out
-          rm -rf build/out
-          rm -rf AnyKernel3
-
-          rm -f build.log
-          rm -f Module.symvers
-          rm -f modules.order
-          rm -f .scmversion
-
-          find . -name "*.o" -delete || true
-          find . -name "*.mod" -delete || true
-          find . -name "*.mod.c" -delete || true
-          find . -name ".*.cmd" -delete || true
-          find . -name ".tmp_*" -type f -delete || true
-          find . -name "*.a" -delete || true
-
-          echo "===== AFTER CLEAN ====="
+          rm -rf out build/out AnyKernel3
+          rm -f build.log Module.symvers modules.order .scmversion
+          find . \
+            \( -path ./.git -o -path ./toolchain -o -path ./clang \) -prune -o \
+            \( -name '*.o' -o -name '*.mod' -o -name '*.mod.c' -o -name '.*.cmd' -o -name '*.a' \) \
+            -type f -delete
+          find . \
+            \( -path ./.git -o -path ./toolchain -o -path ./clang \) -prune -o \
+            -name '.tmp_*' -type f -delete
           df -h
           ls -la
 
-      - name: Prepare tools manually
+      - name: Prepare image tools
         run: |
+          set -euxo pipefail
           echo "===== PREPARE TOOLS ====="
-
-          rm -rf KernelSU-Next
-          rm -rf clang
-          rm -rf toolchain/mkbootimg
-          rm -rf toolchain/libufdt
+          rm -rf clang toolchain/mkbootimg toolchain/libufdt toolchain/avb
           rm -f toolchain/mkdtimg
-
           mkdir -p toolchain
 
-          git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next
           git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg toolchain/mkbootimg
           git clone --depth=1 https://android.googlesource.com/platform/system/libufdt toolchain/libufdt
-
-          echo "===== FIND MKDTIMG ====="
-          find toolchain/libufdt -type f | grep -iE "mkdt.*\.py|mkdtbo.*\.py" || true
+          git clone --depth=1 https://android.googlesource.com/platform/external/avb toolchain/avb
 
           if [ -f toolchain/libufdt/utils/src/mkdtboimg.py ]; then
             cp -f toolchain/libufdt/utils/src/mkdtboimg.py toolchain/mkdtimg
@@ -102,12 +168,10 @@ jobs:
             echo "ERROR: mkdtimg/mkdtboimg script not found"
             exit 1
           fi
-
           chmod +x toolchain/mkdtimg
-
-          echo "===== TOOLCHAIN FILES ====="
-          ls -l toolchain/mkdtimg
-          ls -la toolchain/mkbootimg | head
+          test -f toolchain/avb/avbtool.py
+          ls -l toolchain/mkdtimg toolchain/avb/avbtool.py
+          ls -la toolchain/mkbootimg | head || true
 
       - name: Cache clang
         uses: actions/cache@v5
@@ -117,124 +181,193 @@ jobs:
 
       - name: Setup clang
         run: |
+          set -euxo pipefail
           echo "===== SETUP CLANG ====="
-
-          if [ ! -x "toolchain/clang-r596125/bin/clang" ]; then
+          if [ ! -x toolchain/clang-r596125/bin/clang ]; then
             echo "Clang not found, downloading..."
-
             rm -rf toolchain/clang-r596125
             rm -f toolchain/clang.tar.gz
-
             mkdir -p toolchain/clang-r596125
-
             wget -O toolchain/clang.tar.gz \
               "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz"
-
             tar -xf toolchain/clang.tar.gz -C toolchain/clang-r596125
+            rm -f toolchain/clang.tar.gz
           fi
-
           toolchain/clang-r596125/bin/clang --version
 
       - name: Verify vibrator is clean
         run: |
+          set -euo pipefail
           echo "===== CHECK VIBRATOR PATCH TRACE ====="
-
           if grep -RniE "GHOST_DISABLE_VIBRATOR|DISABLE VIBRATOR|force motor OFF|haptic packet blocked|haptic enable blocked|block all enable requests" \
             drivers/vibrator build.sh 2>/dev/null; then
             echo "ERROR: vibrator no-op trace still exists"
             exit 1
           fi
-
           echo "===== CHECK VIBRATOR SOURCE ====="
           grep -RniE "vib_ops->enable|max77705_vibrator_i2c_enable|max77705_vibrator_enable|max77705_update_reg|MOTOR_EN|pwm_enable|CONFIG_MAX77705_VIBRATOR" \
             drivers/vibrator arch/arm64/configs/o1s.config 2>/dev/null || true
-
           echo "Vibrator source looks clean."
 
       - name: Patch build.sh safety fixes
         run: |
+          set -euxo pipefail
           echo "===== PATCH BUILD.SH SAFETY FIXES ====="
-
           chmod +x build.sh
-
-          # Fix invalid clang archive URL if old URL still exists
           sed -i 's#refs/heads/master/clang-r596125.tar.gz#refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz#g' build.sh || true
-
-          # Fix vendor_ramdisk typo $MODEl -> $MODEL / direct output
           sed -i 's#> ../$MODEl/vendor_ramdisk#> ../vendor_ramdisk#g' build.sh || true
           sed -i 's#> ../\$MODEl/vendor_ramdisk#> ../vendor_ramdisk#g' build.sh || true
-
-          # Avoid bad submodule clang
           sed -i 's#git submodule update --init --force --depth=1 --recursive#echo "skip recursive submodules in CI"#g' build.sh || true
-
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("build.sh")
+          text = path.read_text(encoding="utf-8")
+          old = 'find . -name "*.a" -delete || true'
+          new = 'find . \\( -path ./toolchain -o -path ./clang -o -path ./.git -o -path ./KernelSU-Next \\) -prune -o -name "*.a" -type f -delete || true'
+          if old not in text:
+              raise SystemExit("build.sh clang-safe *.a clean pattern not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
           echo "===== VERIFY BUILD.SH PATCH ====="
-          grep -n "clang-r596125\|vendor_ramdisk\|MODEl\|submodule" build.sh || true
+          grep -n "clang-r596125\\|vendor_ramdisk\\|MODEl\\|submodule\\|name \\\"\\*.a\\\"" build.sh || true
 
       - name: Final clean before build
         run: |
+          set -euxo pipefail
           echo "===== FINAL CLEAN BEFORE BUILD ====="
-
-          rm -rf out
-          rm -rf build/out
+          rm -rf out build/out
           rm -f build.log
-
-          find . -name "*.o" -delete || true
-          find . -name "*.mod" -delete || true
-          find . -name "*.mod.c" -delete || true
-          find . -name ".*.cmd" -delete || true
-          find . -name ".tmp_*" -type f -delete || true
-          find . -name "*.a" -delete || true
-
+          find . \
+            \( -path ./.git -o -path ./toolchain -o -path ./clang -o -path ./KernelSU-Next \) -prune -o \
+            \( -name '*.o' -o -name '*.mod' -o -name '*.mod.c' -o -name '.*.cmd' \) \
+            -type f -delete
           mkdir -p build/out
-
           echo "Clean done."
 
       - name: Build kernel
         run: |
-          echo "===== BUILD o1s KERNEL ====="
-          bash build.sh -m o1s -k n -s n -r n 2>&1 | tee build.log
+          set -euxo pipefail
+          echo "===== BUILD o1s ${VARIANT} KERNEL ====="
+          echo "build.sh -m ${MODEL} -k ${KSU_OPTION} -s ${SUSFS_OPTION} -r n"
+          bash build.sh -m "${MODEL}" -k "${KSU_OPTION}" -s "${SUSFS_OPTION}" -r n 2>&1 | tee build.log
+
+      - name: Pack ODIN + TWRP + vbmeta
+        run: |
+          set -euxo pipefail
+          OUT="build/out/${MODEL}"
+          test -f "${OUT}/boot.img"
+          test -f "${OUT}/vendor_boot.img"
+          test -f "${OUT}/dtbo.img"
+
+          echo "===== CREATE DISABLED VBMETA ====="
+          python3 toolchain/avb/avbtool.py make_vbmeta_image \
+            --flags 2 \
+            --padding_size 4096 \
+            --output "${OUT}/vbmeta.img"
+          python3 toolchain/avb/avbtool.py make_vbmeta_image \
+            --flags 2 \
+            --padding_size 4096 \
+            --output "${OUT}/vbmeta_system.img"
+          python3 toolchain/avb/avbtool.py info_image --image "${OUT}/vbmeta.img" || true
+
+          echo "===== UPDATE TWRP ZIP WITH VBMETA ====="
+          mapfile -t ZIPS < <(find "${OUT}" -maxdepth 1 -type f -name '*.zip' | sort)
+          if [ "${#ZIPS[@]}" -eq 0 ]; then
+            echo "ERROR: AnyKernel/TWRP zip missing"
+            exit 1
+          fi
+          for zip_path in "${ZIPS[@]}"; do
+            zip -j -u "${zip_path}" "${OUT}/vbmeta.img" "${OUT}/vbmeta_system.img"
+          done
+          cp -f "${ZIPS[0]}" "${OUT}/G991B_${LABEL}_TWRP.zip"
+
+          echo "===== PACK ODIN tar.md5 ====="
+          STAGE="${OUT}/odin-stage"
+          rm -rf "${STAGE}"
+          mkdir -p "${STAGE}"
+          cp -f "${OUT}/boot.img" "${OUT}/vendor_boot.img" "${OUT}/dtbo.img" \
+                "${OUT}/vbmeta.img" "${OUT}/vbmeta_system.img" "${STAGE}/"
+
+          pack_tar_md5() {
+            local tar_name="$1"
+            shift
+            local tar_path="${OUT}/${tar_name}"
+            tar --format=ustar -C "${STAGE}" -cf "${tar_path}" "$@"
+            (cd "${OUT}" && md5sum "${tar_name}" >> "${tar_name}")
+            mv "${tar_path}" "${tar_path}.md5"
+          }
+
+          pack_tar_md5 "G991B_${LABEL}_ODIN.tar" \
+            boot.img vendor_boot.img dtbo.img vbmeta.img vbmeta_system.img
+
+          echo "===== PACK ODIN LZ4 tar.md5 ====="
+          lz4 -B6 --content-size -f "${STAGE}/boot.img" "${STAGE}/boot.img.lz4"
+          lz4 -B6 --content-size -f "${STAGE}/vendor_boot.img" "${STAGE}/vendor_boot.img.lz4"
+          lz4 -B6 --content-size -f "${STAGE}/dtbo.img" "${STAGE}/dtbo.img.lz4"
+          lz4 -B6 --content-size -f "${STAGE}/vbmeta.img" "${STAGE}/vbmeta.img.lz4"
+          lz4 -B6 --content-size -f "${STAGE}/vbmeta_system.img" "${STAGE}/vbmeta_system.img.lz4"
+          pack_tar_md5 "G991B_${LABEL}_ODIN_LZ4.tar" \
+            boot.img.lz4 vendor_boot.img.lz4 dtbo.img.lz4 vbmeta.img.lz4 vbmeta_system.img.lz4
+
+          echo "===== SHA256 ====="
+          (
+            cd "${OUT}"
+            files=(
+              Image boot.img vendor_boot.img dtbo.img
+              vbmeta.img vbmeta_system.img
+              "G991B_${LABEL}_TWRP.zip"
+              "G991B_${LABEL}_ODIN.tar.md5"
+              "G991B_${LABEL}_ODIN_LZ4.tar.md5"
+            )
+            [ -f dtb.img ] && files+=(dtb.img)
+            shopt -s nullglob
+            files+=(./*.zip)
+            sha256sum "${files[@]}" | sort -u > SHA256SUMS.txt
+            cat SHA256SUMS.txt
+            {
+              echo "## o1s ${VARIANT} artifacts"
+              echo
+              echo '```'
+              cat SHA256SUMS.txt
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          )
+          rm -rf "${STAGE}"
 
       - name: Verify fresh outputs
         if: always()
         run: |
+          set +e
           echo "===== OUTPUT FILES ====="
-          find build/out/o1s -type f | sort || true
-
-          echo "===== VIBRATOR MODULES IN OUTPUT ====="
-          find build/out/o1s -type f | grep -iE "vib|haptic|max77705|sec_vibrator|\.ko" | sort || true
-
+          find build/out/o1s -maxdepth 2 -type f | sort || true
           echo "===== IMPORTANT ARTIFACTS ====="
-          ls -lh build/out/o1s/Image 2>/dev/null || true
-          ls -lh build/out/o1s/boot.img 2>/dev/null || true
-          ls -lh build/out/o1s/vendor_boot.img 2>/dev/null || true
-          ls -lh build/out/o1s/dtb.img 2>/dev/null || true
-          ls -lh build/out/o1s/dtbo.img 2>/dev/null || true
-          ls -lh build/out/o1s/*.zip 2>/dev/null || true
-
+          ls -lh build/out/o1s/Image build/out/o1s/*.img build/out/o1s/*.zip build/out/o1s/*.tar.md5 2>/dev/null || true
           echo "===== ERROR LINES ====="
           grep -i -n "error:\|fatal error:\|undefined reference\|No such file\|ld.lld:\|FAILED\|abort\|SecurityException" build.log | head -250 || true
-
           echo "===== LAST 250 LINES ====="
           tail -250 build.log || true
 
-      - name: Fail if vendor_boot missing
+      - name: Fail if required flash files missing
         run: |
-          if [ ! -f build/out/o1s/vendor_boot.img ]; then
-            echo "ERROR: vendor_boot.img not found."
-            echo "Vibrator modules are usually inside vendor_boot/vendor ramdisk."
-            echo "If you flash only Image/boot.img, old vibrator module may still be used."
-            exit 1
-          fi
+          set -euxo pipefail
+          test -f build/out/o1s/vendor_boot.img
+          test -f build/out/o1s/boot.img
+          test -f build/out/o1s/dtbo.img
+          test -f "build/out/o1s/G991B_${LABEL}_TWRP.zip"
+          test -f "build/out/o1s/G991B_${LABEL}_ODIN.tar.md5"
+          test -f "build/out/o1s/G991B_${LABEL}_ODIN_LZ4.tar.md5"
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: o1s-kernel-clean-build
+          name: o1s-${{ matrix.variant }}-ghost-full
+          if-no-files-found: warn
           path: |
             build.log
+            build/out/o1s/SHA256SUMS.txt
             build/out/o1s/Image
             build/out/o1s/*.img
             build/out/o1s/*.zip
+            build/out/o1s/*.tar.md5
             build/out/o1s/modules/**
-          if-no-files-found: warn
