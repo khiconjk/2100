@@ -155,13 +155,11 @@ jobs:
           echo "===== CLEAN OLD BUILD OUTPUTS ====="
           rm -rf out build/out AnyKernel3
           rm -f build.log Module.symvers modules.order .scmversion
+          # GNU find: -delete implies -depth and cannot be combined with -prune.
           find . \
-            \( -path ./.git -o -path ./toolchain -o -path ./clang \) -prune -o \
-            \( -name '*.o' -o -name '*.mod' -o -name '*.mod.c' -o -name '.*.cmd' -o -name '*.a' \) \
+            ! -path './.git/*' ! -path './toolchain/*' ! -path './clang/*' \
+            \( -name '*.o' -o -name '*.mod' -o -name '*.mod.c' -o -name '.*.cmd' -o -name '*.a' -o -name '.tmp_*' \) \
             -type f -delete
-          find . \
-            \( -path ./.git -o -path ./toolchain -o -path ./clang \) -prune -o \
-            -name '.tmp_*' -type f -delete
           df -h
           ls -la
 
@@ -244,7 +242,7 @@ jobs:
           path = Path("build.sh")
           text = path.read_text(encoding="utf-8")
           old = 'find . -name "*.a" -delete || true'
-          new = 'find . \\( -path ./toolchain -o -path ./clang -o -path ./.git -o -path ./KernelSU-Next \\) -prune -o -name "*.a" -type f -delete || true'
+          new = 'find . -name "*.a" ! -path "./toolchain/*" ! -path "./clang/*" ! -path "./.git/*" ! -path "./KernelSU-Next/*" -type f -delete || true'
           if old not in text:
               raise SystemExit("build.sh clang-safe *.a clean pattern not found")
           path.write_text(text.replace(old, new, 1), encoding="utf-8")
@@ -259,8 +257,8 @@ jobs:
           rm -rf out build/out
           rm -f build.log
           find . \
-            \( -path ./.git -o -path ./toolchain -o -path ./clang -o -path ./KernelSU-Next \) -prune -o \
-            \( -name '*.o' -o -name '*.mod' -o -name '*.mod.c' -o -name '.*.cmd' \) \
+            ! -path './.git/*' ! -path './toolchain/*' ! -path './clang/*' ! -path './KernelSU-Next/*' \
+            \( -name '*.o' -o -name '*.mod' -o -name '*.mod.c' -o -name '.*.cmd' -o -name '.tmp_*' \) \
             -type f -delete
           mkdir -p build/out
           echo "Clean done."
