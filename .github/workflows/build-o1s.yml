@@ -56,26 +56,47 @@ permissions:
   contents: read
 
 jobs:
+  select:
+    name: Select variants
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.select.outputs.include }}
+    steps:
+      - id: select
+        name: Build matrix JSON
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VARIANT: ${{ github.event.inputs.variant }}
+        run: |
+          set -euo pipefail
+          vanilla='{"variant":"vanilla","ksu":"n","susfs":"n","label":"VANILLA_GHOST_FULL"}'
+          ksun='{"variant":"ksun-susfs","ksu":"y","susfs":"y","label":"KSUN_SUSFS_GHOST_FULL"}'
+          if [ "$EVENT_NAME" != "workflow_dispatch" ] || [ -z "$VARIANT" ] || [ "$VARIANT" = "all" ]; then
+            include="[$vanilla,$ksun]"
+          elif [ "$VARIANT" = "vanilla" ]; then
+            include="[$vanilla]"
+          elif [ "$VARIANT" = "ksun-susfs" ]; then
+            include="[$ksun]"
+          else
+            echo "Unknown variant: $VARIANT"
+            exit 1
+          fi
+          {
+            echo "include<<EOF"
+            echo "$include"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Selected matrix: $include"
+
   build:
     name: o1s ${{ matrix.variant }}
+    needs: select
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - variant: vanilla
-            ksu: "n"
-            susfs: "n"
-            label: VANILLA_GHOST_FULL
-          - variant: ksun-susfs
-            ksu: "y"
-            susfs: "y"
-            label: KSUN_SUSFS_GHOST_FULL
-    if: >
-      github.event_name != 'workflow_dispatch'
-      || github.event.inputs.variant == 'all'
-      || github.event.inputs.variant == matrix.variant
+        include: ${{ fromJSON(needs.select.outputs.include) }}
 
     env:
       MODEL: o1s
