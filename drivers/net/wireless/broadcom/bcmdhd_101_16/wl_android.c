@@ -4874,14 +4874,13 @@ exit:
 static int wl_android_get_factory_mac_addr(struct net_device *ndev, char *command, int total_len)
 {
 	int ret;
-	struct bcm_cfg80211 *cfg = wl_get_cfg(ndev);
 
 	if (total_len < ETHER_ADDR_STR_LEN) {
 		DHD_ERROR(("wl_android_get_factory_mac_addr buflen %d"
 			"is less than factory mac addr\n", total_len));
 		return BCME_ERROR;
 	}
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 	{
 		u8 gmac[ETH_ALEN];
 
@@ -4890,9 +4889,13 @@ static int wl_android_get_factory_mac_addr(struct net_device *ndev, char *comman
 		return ret;
 	}
 #else
-	ret = snprintf(command, total_len, MACDBG,
-		MAC2STRDBG(bcmcfg_to_prmry_ndev(cfg)->perm_addr));
-	return ret;
+	{
+		struct bcm_cfg80211 *cfg = wl_get_cfg(ndev);
+
+		ret = snprintf(command, total_len, MACDBG,
+			MAC2STRDBG(bcmcfg_to_prmry_ndev(cfg)->perm_addr));
+		return ret;
+	}
 #endif
 }
 

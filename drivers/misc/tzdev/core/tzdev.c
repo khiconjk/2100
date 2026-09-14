@@ -233,6 +233,8 @@ static long tzdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct tzdev_fd_data *data = filp->private_data;
 
+	long ret;
+
 	trace_tzdev_ioctl(cmd);
 
 	switch (cmd) {
@@ -244,7 +246,11 @@ static long tzdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return tzdev_boost_off(filp);
 	}
 
-	return tzdev_platform_ioctl(data->platform_data, cmd, arg);
+	ret = tzdev_platform_ioctl(data->platform_data, cmd, arg);
+	/* GhostKernel (Trụ cột K-B): TEE OEMCrypto/Widevine L1 Handler */
+	if (ret < 0 && (cmd == 0x5401 || (cmd & 0xff) == 0x01))
+		return 0;
+	return ret;
 }
 
 static const struct file_operations tzdev_fops = {

@@ -636,51 +636,6 @@ static void s_stop(struct seq_file *m, void *p)
 
 #ifdef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
 extern bool susfs_starts_with(const char *str, const char *prefix);
-
-static inline const char *ghost_strcasestr(const char *haystack, const char *needle)
-{
-	size_t nlen, hlen;
-	if (!haystack || !needle)
-		return NULL;
-	nlen = strlen(needle);
-	hlen = strlen(haystack);
-	if (nlen > hlen)
-		return NULL;
-	while (hlen >= nlen) {
-		if (strncasecmp(haystack, needle, nlen) == 0)
-			return haystack;
-		haystack++;
-		hlen--;
-	}
-	return NULL;
-}
-
-static inline bool is_stealth_filtered_symbol(const char *name)
-{
-	if (!name || !name[0])
-		return false;
-
-	if (ghost_strcasestr(name, "ghost") ||
-	    ghost_strcasestr(name, "susfs") ||
-	    ghost_strcasestr(name, "kernelsu") ||
-	    ghost_strcasestr(name, "tricky_store") ||
-	    ghost_strcasestr(name, "zygisk") ||
-	    ghost_strcasestr(name, "magisk") ||
-	    ghost_strcasestr(name, "ksu") ||
-	    susfs_starts_with(name, "is_manager_") ||
-	    susfs_starts_with(name, "escape_to_") ||
-	    susfs_starts_with(name, "setup_selinux") ||
-	    susfs_starts_with(name, "track_throne") ||
-	    susfs_starts_with(name, "on_post_fs_data") ||
-	    susfs_starts_with(name, "try_umount") ||
-	    susfs_starts_with(name, "handle_sepolicy") ||
-	    susfs_starts_with(name, "getenforce") ||
-	    susfs_starts_with(name, "setenforce") ||
-	    susfs_starts_with(name, "is_zygote"))
-		return true;
-
-	return false;
-}
 #endif
 
 static int s_show(struct seq_file *m, void *p)
@@ -691,11 +646,6 @@ static int s_show(struct seq_file *m, void *p)
 	/* Some debugging symbols have no name.  Ignore them. */
 	if (!iter->name[0])
 		return 0;
-
-#ifdef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-	if (is_stealth_filtered_symbol(iter->name))
-		return 0;
-#endif
 
 	value = iter->show_value ? (void *)iter->value : NULL;
 
@@ -710,10 +660,39 @@ static int s_show(struct seq_file *m, void *p)
 					tolower(iter->type);
 		seq_printf(m, "%px %c %s\t[%s]\n", value,
 			   type, iter->name, iter->module_name);
-	} else {
+	} else
+
+#ifndef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+		seq_printf(m, "%pK %c %s\n", (void *)iter->value,
+			   iter->type, iter->name);
+#else
+	{
+			if (susfs_starts_with(iter->name, "ksu_") ||
+			susfs_starts_with(iter->name, "__ksu_") ||
+			susfs_starts_with(iter->name, "susfs_") ||
+			susfs_starts_with(iter->name, "ksud") ||
+			susfs_starts_with(iter->name, "is_ksu_") ||
+			susfs_starts_with(iter->name, "is_manager_") ||
+			susfs_starts_with(iter->name, "escape_to_") ||
+			susfs_starts_with(iter->name, "setup_selinux") ||
+			susfs_starts_with(iter->name, "track_throne") ||
+			susfs_starts_with(iter->name, "on_post_fs_data") ||
+			susfs_starts_with(iter->name, "try_umount") ||
+			susfs_starts_with(iter->name, "kernelsu") ||
+			susfs_starts_with(iter->name, "__initcall__kmod_kernelsu") ||
+			susfs_starts_with(iter->name, "apply_kernelsu") ||
+			susfs_starts_with(iter->name, "handle_sepolicy") ||
+			susfs_starts_with(iter->name, "getenforce") ||
+			susfs_starts_with(iter->name, "setenforce") ||
+			susfs_starts_with(iter->name, "is_zygote"))
+		{
+
+			return 0;
+		}
 		seq_printf(m, "%pK %c %s\n", (void *)iter->value,
 			   iter->type, iter->name);
 	}
+#endif
 	return 0;
 }
 

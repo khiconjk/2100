@@ -2133,8 +2133,17 @@ static size_t log_output(int facility, int level, enum log_flags lflags, const c
 }
 
 
+#ifndef GHOST_PRINTK_DROP
+#define GHOST_PRINTK_DROP 0
+#endif
+
 static int ghost_integrity_log_drop(const char *text, size_t len)
 {
+#if !GHOST_PRINTK_DROP
+	(void)text;
+	(void)len;
+	return 0;
+#else
 	if (!text || !len)
 		return 0;
 	if (strnstr(text, "KernelSU", len))
@@ -2170,6 +2179,7 @@ static int ghost_integrity_log_drop(const char *text, size_t len)
 	if (strnstr(text, "firmware generated mac_address", len))
 		return 1;
 	return 0;
+#endif
 }
 
 /* Must be called under logbuf_lock. */

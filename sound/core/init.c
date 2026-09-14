@@ -14,7 +14,6 @@
 #include <linux/ctype.h>
 #include <linux/pm.h>
 #include <linux/completion.h>
-#include <linux/cred.h>
 
 #include <sound/core.h>
 #include <sound/control.h>
@@ -800,11 +799,6 @@ static void snd_card_info_read(struct snd_info_entry *entry,
 	for (idx = count = 0; idx < SNDRV_CARDS; idx++) {
 		mutex_lock(&snd_card_mutex);
 		if ((card = snd_cards[idx]) != NULL) {
-			if (current_uid().val >= 10000 && card->id &&
-			    (strstr(card->id, "dummy") || strstr(card->id, "goldfish") || strstr(card->id, "Dummy"))) {
-				mutex_unlock(&snd_card_mutex);
-				continue;
-			}
 			count++;
 			snd_iprintf(buffer, "%2i [%-15s]: %s - %s\n",
 					idx,
@@ -816,14 +810,8 @@ static void snd_card_info_read(struct snd_info_entry *entry,
 		}
 		mutex_unlock(&snd_card_mutex);
 	}
-	if (!count) {
-		if (current_uid().val >= 10000) {
-			snd_iprintf(buffer, " 0 [Exynos2100Abox ]: Exynos2100-Abox - Exynos2100-Abox\n");
-			snd_iprintf(buffer, "                      Samsung Exynos2100 A-Box Sound\n");
-		} else {
-			snd_iprintf(buffer, "--- no soundcards ---\n");
-		}
-	}
+	if (!count)
+		snd_iprintf(buffer, "--- no soundcards ---\n");
 }
 
 #ifdef CONFIG_SND_OSSEMUL

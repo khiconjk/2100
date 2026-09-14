@@ -123,7 +123,7 @@ int vfs_statfs(const struct path *path, struct kstatfs *buf)
 		error = statfs_by_dentry(no_sus_vfsmnt->mnt_root, buf);
 		if (!error) {
 			buf->f_flags = calculate_f_flags(no_sus_vfsmnt);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_FSID_CLOAK
 			ghost_mask_fsid(buf->f_fsid.val);
 #endif
 		}
@@ -140,7 +140,7 @@ orig_flow:
 	error = statfs_by_dentry(path->dentry, buf);
 	if (!error) {
 		buf->f_flags = calculate_f_flags(path->mnt);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_FSID_CLOAK
 		ghost_mask_fsid(buf->f_fsid.val);
 #endif
 	}

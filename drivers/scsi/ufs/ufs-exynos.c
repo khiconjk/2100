@@ -570,7 +570,7 @@ static void ufs_set_sec_unique_number(struct ufs_hba *hba, u8 *desc_buf)
 
 	/* Null terminate the unique number string */
 	ufs_vdi.unique_number[UFS_UN_20_DIGITS] = '\0';
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	{
 		char gun[24];
 
@@ -633,7 +633,7 @@ static void ufs_get_health_desc(struct ufs_hba *hba)
 		ufs_vdi.flt = 0;
 		break;
 	}
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	ghost_get_ufs_health(&eol, &life_a, &life_b);
 	if (desc_buf) {
 		desc_buf[HEALTH_DESC_PARAM_EOL_INFO] = eol;
@@ -1111,7 +1111,7 @@ wb_disabled:
 static ssize_t ufs_unique_number_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	{
 		char gun[24];
 
@@ -1128,7 +1128,7 @@ static DEVICE_ATTR(un, 0440, ufs_unique_number_show, NULL);
 static ssize_t ufs_lt_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	{
 		u8 eol = 0;
 		u8 life_a = 1;
@@ -1160,7 +1160,7 @@ static DEVICE_ATTR(lt, 0444, ufs_lt_show, NULL);
 static ssize_t ufs_flt_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	return snprintf(buf, PAGE_SIZE, "%u\n", ghost_get_ufs_flt());
 #else
 	return snprintf(buf, PAGE_SIZE, "%u\n", ufs_vdi.flt);
@@ -1171,7 +1171,7 @@ static DEVICE_ATTR(flt, 0444, ufs_flt_show, NULL);
 static ssize_t ufs_eli_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	{
 		u8 eol = 0;
 		u8 life_a = 1;
@@ -1222,7 +1222,7 @@ static DEVICE_ATTR(shi, 0664, ufs_shi_show, ufs_shi_store);
 static ssize_t ufs_man_id_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	return snprintf(buf, PAGE_SIZE, "%04x\n", 0x01ce);
 #else
 	{
@@ -1239,7 +1239,7 @@ static DEVICE_ATTR(man_id, 0444, ufs_man_id_show, NULL);
 static ssize_t ufs_transferred_cnt_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	return sprintf(buf, "%llu\n", ghost_get_ufs_transferred_bytes());
 #else
 	{

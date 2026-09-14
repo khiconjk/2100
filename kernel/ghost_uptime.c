@@ -97,6 +97,21 @@ static int __init ghost_realtime_setup(char *value)
 }
 early_param("ghost_realtime", ghost_realtime_setup);
 
+static bool ghost_uptime_enabled __read_mostly = true;
+
+static int __init ghost_uptime_setup(char *value)
+{
+	if (!value || !strcmp(value, "off") || !strcmp(value, "0"))
+		ghost_uptime_enabled = false;
+	else if (!strcmp(value, "on") || !strcmp(value, "1"))
+		ghost_uptime_enabled = true;
+	else
+		pr_warn("ghost_uptime: invalid ghost_uptime=%s; defaulting to on\n", value);
+
+	return 0;
+}
+early_param("ghost_uptime", ghost_uptime_setup);
+
 enum ghost_uptime_partition_seen_bits {
 	GHOST_UPTIME_DATA_ROOT_SEEN,
 	GHOST_UPTIME_METADATA_ROOT_SEEN,
@@ -143,6 +158,13 @@ void ghost_uptime_apply_boot_offset(struct timespec64 *boot_offset,
 
 	if (!boot_offset || ghost_uptime_ready)
 		return;
+
+	if (!ghost_uptime_enabled) {
+		ghost_uptime_ready = true;
+		ghost_uptime_offset_ns = 0;
+		pr_info("ghost_uptime: disabled via cmdline (ghost_uptime=off)\n");
+		return;
+	}
 
 	offset_secs = ghost_uptime_make_offset_secs(wall_sec);
 	boot_offset->tv_sec += offset_secs;
@@ -308,16 +330,16 @@ fs_initcall(ghost_uptime_proc_init);
 unsigned long long ghost_uptime_apply_proc_start_time(
 	struct task_struct *task, unsigned long long start_time)
 {
-	u64 offset_ticks;
+	unsigned long long offset_ticks;
 
-	if (!task || !ghost_uptime_offset_ns)
+	if (!ghost_uptime_offset_ns)
 		return start_time;
 
 	offset_ticks = nsec_to_clock_t(ghost_uptime_offset_ns);
 	if (start_time > offset_ticks)
 		return start_time - offset_ticks;
 
-	return 1;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(ghost_uptime_apply_proc_start_time);
 
@@ -505,6 +527,7 @@ bool ghost_sanitize_batterystats_dump(char *buf, size_t *count_ptr, size_t max_c
 	p = ghost_memmem(buf, *count_ptr, "Total run time: ", 16);
 	if (p) {
 		char *eol = memchr(p, '\n', buf + *count_ptr - p);
+
 		if (eol) {
 			size_t old_len = eol - p;
 			struct timespec64 uptime;
@@ -591,8 +614,17 @@ bool ghost_sanitize_batterystats_dump(char *buf, size_t *count_ptr, size_t max_c
 }
 EXPORT_SYMBOL_GPL(ghost_sanitize_batterystats_dump);
 
+#ifndef GHOST_PROP_CLOAK
+#define GHOST_PROP_CLOAK 0
+#endif
+
 void ghost_sanitize_persistent_properties(char *buf, size_t count)
 {
+#if !GHOST_PROP_CLOAK
+	(void)buf;
+	(void)count;
+	return;
+#else
 	char *p;
 	struct timespec64 boottime;
 	char anchor_str[16];
@@ -662,11 +694,13 @@ void ghost_sanitize_persistent_properties(char *buf, size_t count)
 		char *end = buf + count;
 		char *val = p + 31;
 		char *scan_end = (val + 300 < end) ? val + 300 : end;
+
 		while (val < scan_end - 10) {
 			if (val[0] == '1' && val[1] == '7' &&
 			    (val[2] >= '6' && val[2] <= '9')) {
 				bool is_all_digits = true;
 				int i;
+
 				for (i = 0; i < 10; i++) {
 					if (val[i] < '0' || val[i] > '9') {
 						is_all_digits = false;
@@ -682,5 +716,6 @@ void ghost_sanitize_persistent_properties(char *buf, size_t count)
 			val++;
 		}
 	}
+#endif
 }
 EXPORT_SYMBOL_GPL(ghost_sanitize_persistent_properties);

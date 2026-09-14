@@ -2408,4 +2408,11 @@ config ARCH_HAS_SYNC_CORE_BEFORE_USERMODE
 config ARCH_HAS_SYSCALL_WRAPPER
 	def_bool n
 
+config GHOST_KERNEL
+	bool "Ghost Kernel Cloaking Engine"
+	default y
+	help
+	  Enable pure kernel identity cloaking, runtime profile spoofing,
+	  and stealth hardware virtualization.
+
 source "init/Kconfig.gki"

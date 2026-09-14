@@ -487,7 +487,7 @@ static ssize_t
 show_mac_addr(struct dhd_info *dev, char *buf)
 {
 	ssize_t ret = 0;
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 	{
 		u8 gmac[6];
 

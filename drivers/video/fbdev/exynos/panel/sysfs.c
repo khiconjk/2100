@@ -648,7 +648,7 @@ static ssize_t manufacture_code_show(struct device *dev,
 	u8 code[5] = { 0, };
 	struct panel_info *panel_data;
 	struct panel_device *panel = dev_get_drvdata(dev);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_PANEL_CLOAK
 	{
 		char gid[16] = {0};
 
@@ -684,7 +684,7 @@ static ssize_t cell_id_show(struct device *dev,
 	u8 date[PANEL_DATE_LEN] = { 0, }, coordinate[4] = { 0, };
 	struct panel_info *panel_data;
 	struct panel_device *panel = dev_get_drvdata(dev);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_PANEL_CLOAK
 	{
 		char gid[32] = {0};
 		ghost_get_panel_cellid_buf(gid, sizeof(gid));
@@ -724,7 +724,7 @@ static ssize_t octa_id_show(struct device *dev,
 	struct panel_device *panel = dev_get_drvdata(dev);
 	int len = 0;
 	bool cell_id_exist = true;
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_PANEL_CLOAK
 	{
 		char gid[32] = {0};
 		ghost_get_panel_octaid_buf(gid, sizeof(gid));
@@ -798,7 +798,7 @@ static ssize_t color_coordinate_show(struct device *dev,
 static ssize_t manufacture_date_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_PANEL_CLOAK
 	int gy = 2022, gm = 1, gd = 1, gh = 12, gmin = 0;
 
 	ghost_get_panel_manufacture_date(&gy, &gm, &gd, &gh, &gmin);

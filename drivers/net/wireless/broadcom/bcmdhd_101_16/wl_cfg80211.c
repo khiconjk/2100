@@ -16315,7 +16315,7 @@ static s32 __wl_cfg80211_up(struct bcm_cfg80211 *cfg)
 
 	(void)memcpy_s(wdev->wiphy->perm_addr, ETHER_ADDR_LEN,
 		bcmcfg_to_prmry_ndev(cfg)->perm_addr, ETHER_ADDR_LEN);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 	{
 		u8 gmac[ETH_ALEN];
 

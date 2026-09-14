@@ -25,6 +25,8 @@
 #include "rdev-ops.h"
 #if __has_include(<linux/ghost_config.h>)
 #include <linux/ghost_config.h>
+#endif
+#if GHOST_WIFI_CLOAK
 static void ghost_cfg80211_note_bss_ies(const u8 *bssid, const u8 *ie, size_t ielen)
 {
 	const u8 *ssid_ie = NULL;
@@ -1468,6 +1470,10 @@ cfg80211_get_bss_channel(struct wiphy *wiphy, const u8 *ie, size_t ielen,
 /* Ghost Kernel (Pillar 24): Subtle Wi-Fi RSSI jitter to scramble indoor triangulation */
 static inline int ghost_apply_wifi_rssi_jitter(int signal, enum cfg80211_signal_type type)
 {
+#if !GHOST_WIFI_CLOAK
+	(void)type;
+	return signal;
+#else
 	int jitter;
 	u64 now = sched_clock();
 
@@ -1489,6 +1495,7 @@ static inline int ghost_apply_wifi_rssi_jitter(int signal, enum cfg80211_signal_
 			signal = 100;
 	}
 	return signal;
+#endif
 }
 
 /* Returned bss is reference counted and must be cleaned up appropriately. */

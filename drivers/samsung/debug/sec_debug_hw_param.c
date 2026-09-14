@@ -84,7 +84,7 @@ static ssize_t secdbg_hprm_ap_info_show(struct device *dev,
 	reverse_id_0 = chipid_reverse_value(exynos_soc_info.lot_id, 32);
 	tmp = (reverse_id_0 >> 11) & 0x1FFFFF;
 	chipid_dec_to_36(tmp, lot_id);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_HWPARAM_CLOAK
 	ghost_get_chip_lot_buf(lot_id, sizeof(lot_id));
 #endif
 
@@ -120,7 +120,7 @@ static ssize_t secdbg_hprm_ap_info_show(struct device *dev,
 
 	asb_ver = id_get_asb_ver();
 	psite = id_get_product_line();
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_HWPARAM_CLOAK
 	ghost_get_asb_psite(&asb_ver, &psite);
 #endif
 	info_size +=
@@ -140,7 +140,7 @@ static ssize_t secdbg_hprm_ap_info_show(struct device *dev,
 		snprintf((char *)(buf + info_size), DATA_SIZE - info_size,
 				"\"VST_ADJUST\":\"%d\",", volt_vst_cal_bdata);
 #endif
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_HWPARAM_CLOAK
 	ghost_get_asv_values(asv);
 	ghost_get_ids_values(ids);
 	info_size +=

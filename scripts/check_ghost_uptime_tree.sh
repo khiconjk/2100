@@ -246,12 +246,12 @@ require_contains 'ksu-metadata-tag-lock' \
     'KSU_EXPECTED_VERSION_TAG' build.sh 2
 require_contains 'ksu-metadata-code-lock' \
     'KSU_EXPECTED_VERSION_CODE' build.sh 2
-require_contains 'ksu-version-override-input' \
-    'KSU_VERSION_OVERRIDE=${KSU_VERSION_OVERRIDE:-33129}' build.sh
-require_contains 'ksu-version-override-make-arg' \
-    'KSU_VERSION_OVERRIDE=$KSU_VERSION_OVERRIDE' build.sh
-require_contains 'ksu-version-override-patch' \
-    'patches/ksu-version-override.patch' build.sh 2
+require_contains 'ksu-metadata-code-compute' \
+    'version_code=$((30000 + revision_count + 150))' build.sh
+require_contains 'ksu-metadata-commit-log' \
+    "printf 'KSU_SOURCE_COMMIT=%s" build.sh
+require_contains 'ksu-metadata-code-log' \
+    "printf 'KSU_VERSION_CODE=%s" build.sh
 require_contains 'device-check-ksu-version-code' \
     "pass 'ksu-version-code'" scripts/check_ghost_uptime_device.sh
 require_contains 'device-check-ksu-kernel-version' \

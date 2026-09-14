@@ -1306,7 +1306,7 @@ dhd_check_module_mac(dhd_pub_t *dhdp)
 			}
 #endif /* DHD_EXPORT_CNTL_FILE */
 			/* update MAC address */
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 			{
 				uint8 gmac[ETHER_ADDR_LEN];
 
@@ -1353,7 +1353,7 @@ dhd_check_module_mac(dhd_pub_t *dhdp)
 #endif /* !DHD_MAC_ADDR_EXPORT */
 	}
 
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 	ghost_copy_wifi_mac(mac->octet);
 #ifdef DHD_MAC_ADDR_EXPORT
 	memcpy(&sysfs_mac_addr, mac, sizeof(sysfs_mac_addr));

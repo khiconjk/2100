@@ -15,7 +15,6 @@
 #include <linux/kernel.h>
 #include "../ssp.h"
 #include "sensors.h"
-#include <linux/ghost_config.h>
 /*************************************************************************/
 /* factory Sysfs                                                         */
 /*************************************************************************/
@@ -317,13 +316,13 @@ static ssize_t matrix_store(struct device *dev,
 static ssize_t magnetic_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    return ghost_sysfs_print_sensor_text(buf, get_mag(dev_get_drvdata(dev))->vendor);
+    return sprintf(buf, "%s\n", get_mag(dev_get_drvdata(dev))->vendor);
 }
 
 static ssize_t magnetic_name_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    return ghost_sysfs_print_sensor_text(buf, get_mag(dev_get_drvdata(dev))->name);
+    return sprintf(buf, "%s\n", get_mag(dev_get_drvdata(dev))->name);
 }
 
 static ssize_t raw_data_show(struct device *dev,

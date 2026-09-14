@@ -15,10 +15,12 @@ unset_flags()
     cat << EOF
 Usage: $(basename "$0") [options]
 Options:
-    -m, --model [value]    Specify the model code of the phone
+    -m, --model [value]    Specify the model code of the phone (default: o1s)
     -k, --ksu [y/N]        Include KernelSU
-    -s, --susfs [y/N]      Include SuSFS
+    -s, --susfs [y/N]      Include SuSFS (requires -k y)
     -r, --recovery [y/N]   Compile kernel for Android Recovery
+    -u, --uptime [on/off]  Ghost uptime translation (default: on)
+    --realtime [mode]      Ghost realtime mode: off, backward, forward (default: off)
 EOF
 }
 
@@ -26,28 +28,8 @@ MODEL=""
 KSU_OPTION=""
 SUSFS_OPTION=""
 RECOVERY_OPTION=""
+GHOST_UPTIME_MODE=${GHOST_UPTIME_MODE:-on}
 GHOST_REALTIME_MODE=${GHOST_REALTIME_MODE:-off}
-
-case "$GHOST_REALTIME_MODE" in
-	off)
-		GHOST_REALTIME_CMDLINE_MODE="ghost_realtime=off"
-		GHOST_REALTIME_CFLAG="-DGHOST_REALTIME_DEFAULT_MODE=GHOST_REALTIME_OFF"
-		;;
-	backward)
-		GHOST_REALTIME_CMDLINE_MODE="ghost_realtime=backward"
-		GHOST_REALTIME_CFLAG="-DGHOST_REALTIME_DEFAULT_MODE=GHOST_REALTIME_BACKWARD"
-		;;
-	forward)
-		GHOST_REALTIME_CMDLINE_MODE="ghost_realtime=forward"
-		GHOST_REALTIME_CFLAG="-DGHOST_REALTIME_DEFAULT_MODE=GHOST_REALTIME_FORWARD"
-		;;
-    *)
-        echo "Invalid GHOST_REALTIME_MODE=$GHOST_REALTIME_MODE" >&2
-        abort
-        ;;
-esac
-
-GHOST_KERNEL_CMDLINE="androidboot.selinux=permissive loop.max_part=7 androidboot.vbmeta.device_state=locked androidboot.vbmeta.size=4096 androidboot.vbmeta.digest=7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1 androidboot.boot_hash=7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1 androidboot.bootkey=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.verifiedbootkey=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.vbmeta.public_key_digest=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.vbmeta.avb_version=1.2 androidboot.vbmeta.hash_alg=sha256 $GHOST_REALTIME_CMDLINE_MODE"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -67,6 +49,14 @@ while [[ $# -gt 0 ]]; do
             RECOVERY_OPTION="$2"
             shift 2
             ;;
+        --uptime|-u)
+            GHOST_UPTIME_MODE="$2"
+            shift 2
+            ;;
+        --realtime)
+            GHOST_REALTIME_MODE="$2"
+            shift 2
+            ;;
         *)
             unset_flags
             exit 1
@@ -76,19 +66,78 @@ done
 
 [ -z "$MODEL" ] && MODEL="o1s"
 
+if [ -z "$KSU_OPTION" ]; then
+    KSU_OPTION=n
+fi
+
+if [ -z "$SUSFS_OPTION" ]; then
+    SUSFS_OPTION=n
+fi
+
+if [[ "$RECOVERY_OPTION" == "y" ]]; then
+    RECOVERY=recovery.config
+    KSU_OPTION=n
+    SUSFS_OPTION=n
+fi
+
+# Reject invalid combination: SuSFS without KSU
+if [[ "$KSU_OPTION" != "y" && "$SUSFS_OPTION" == "y" ]]; then
+    echo "ERROR: Invalid option combination: SuSFS (-s y) requires KernelSU (-k y)." >&2
+    echo "Cannot enable SuSFS when KernelSU is disabled." >&2
+    abort
+fi
+
+case "$GHOST_UPTIME_MODE" in
+    on)
+        GHOST_UPTIME_CMDLINE_MODE=""
+        ;;
+    off)
+        GHOST_UPTIME_CMDLINE_MODE="ghost_uptime=off"
+        ;;
+    *)
+        echo "Invalid GHOST_UPTIME_MODE=$GHOST_UPTIME_MODE (expected 'on' or 'off')" >&2
+        abort
+        ;;
+esac
+
+case "$GHOST_REALTIME_MODE" in
+    off)
+        GHOST_REALTIME_CMDLINE_MODE="ghost_realtime=off"
+        GHOST_REALTIME_CFLAG="-DGHOST_REALTIME_DEFAULT_MODE=GHOST_REALTIME_OFF"
+        ;;
+    backward)
+        GHOST_REALTIME_CMDLINE_MODE="ghost_realtime=backward"
+        GHOST_REALTIME_CFLAG="-DGHOST_REALTIME_DEFAULT_MODE=GHOST_REALTIME_BACKWARD"
+        ;;
+    forward)
+        GHOST_REALTIME_CMDLINE_MODE="ghost_realtime=forward"
+        GHOST_REALTIME_CFLAG="-DGHOST_REALTIME_DEFAULT_MODE=GHOST_REALTIME_FORWARD"
+        ;;
+    *)
+        echo "Invalid GHOST_REALTIME_MODE=$GHOST_REALTIME_MODE (expected 'off', 'backward', or 'forward')" >&2
+        abort
+        ;;
+esac
+
+GHOST_KERNEL_CMDLINE="androidboot.selinux=enforcing loop.max_part=7 androidboot.vbmeta.device_state=locked androidboot.vbmeta.size=4096 androidboot.vbmeta.digest=7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1 androidboot.boot_hash=7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1 androidboot.bootkey=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.verifiedbootkey=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.vbmeta.public_key_digest=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781 androidboot.vbmeta.avb_version=1.2 androidboot.vbmeta.hash_alg=sha256 $GHOST_REALTIME_CMDLINE_MODE"
+if [ -n "$GHOST_UPTIME_CMDLINE_MODE" ]; then
+    GHOST_KERNEL_CMDLINE="$GHOST_KERNEL_CMDLINE $GHOST_UPTIME_CMDLINE_MODE"
+fi
+
 fetch_ksu()
 {
-    rm -rf "$PWD/KernelSU-Next"
-
-    echo "Fetching KernelSU Next"
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        git submodule update --init KernelSU-Next || {
-            echo "Submodule failed, cloning KernelSU-Next manually..."
+    if [ ! -d "$PWD/KernelSU-Next" ]; then
+        echo "Fetching KernelSU Next"
+        if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            git submodule update --init KernelSU-Next || {
+                echo "Submodule failed, cloning KernelSU-Next manually..."
+                git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || abort
+            }
+        else
             git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || abort
-        }
-    else
-        git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next || abort
+        fi
     fi
+    ln -sfn ../KernelSU-Next/kernel "$PWD/drivers/kernelsu"
 }
 
 prepare_ksu_metadata()
@@ -142,6 +191,10 @@ prepare_ksu_metadata()
 
 enable_susfs()
 {
+    if grep -q "config KSU_SUSFS" "$PWD/KernelSU-Next/kernel/Kconfig"; then
+        echo "SuSFS already applied to KernelSU Next, skipping patch..."
+        return 0
+    fi
     echo "Applying SuSFS patch to KernelSU Next..."
     patch -d "$PWD/KernelSU-Next" -p1 < "$PWD/patches/enable-susfs.patch" || abort
 }
@@ -153,7 +206,10 @@ CORES=$(nproc)
 
 echo "Cleaning old output..."
 rm -rf out
-rm -rf "build/out/$MODEL"
+mkdir -p "build/out/$MODEL/history"
+mv -f "build/out/$MODEL"/*.zip "build/out/$MODEL/history/" 2>/dev/null || true
+rm -f "build/out/$MODEL/boot.img" "build/out/$MODEL/vendor_boot.img" "build/out/$MODEL/Image"
+rm -rf "build/out/$MODEL/modules"
 find . -name "*.a" -delete || true
 
 # ================= TOOLCHAIN =================
@@ -223,29 +279,15 @@ case "$MODEL" in
 esac
 
 # ================= FLAGS =================
-if [[ "$RECOVERY_OPTION" == "y" ]]; then
-    RECOVERY=recovery.config
-    KSU_OPTION=n
-    SUSFS_OPTION=n
-fi
-
-if [ -z "$KSU_OPTION" ]; then
-    KSU_OPTION=n
-fi
-
-if [ -z "$SUSFS_OPTION" ]; then
-    SUSFS_OPTION=n
-fi
-
 if [[ "$KSU_OPTION" == "y" ]]; then
     KSU=ksu.config
+    if [[ "$SUSFS_OPTION" == "y" ]]; then
+        SUSFS=susfs.config
+    else
+        SUSFS=nosusfs.config
+    fi
 else
     KSU=""
-fi
-
-if [[ "$SUSFS_OPTION" == "y" ]]; then
-    SUSFS=susfs.config
-else
     SUSFS=""
 fi
 
@@ -313,8 +355,20 @@ build_boot()
         echo "-----------------------------------------------"
         echo "Building boot.img RAMDisk..."
 
+        if [ ! -x "build/ramdisk/boot/boot_ramdisk00/init" ]; then
+            INIT_MODE=$(stat -c '%a' "build/ramdisk/boot/boot_ramdisk00/init" 2>/dev/null || echo "missing")
+            echo "ERROR: build/ramdisk/boot/boot_ramdisk00/init is not executable! Current mode: $INIT_MODE" >&2
+            abort
+        fi
+
         rm -rf "build/out/$MODEL/boot_ramdisk00"
         cp -a build/ramdisk/boot/boot_ramdisk00 "build/out/$MODEL/boot_ramdisk00"
+
+        if [ ! -x "build/out/$MODEL/boot_ramdisk00/init" ]; then
+            INIT_MODE=$(stat -c '%a' "build/out/$MODEL/boot_ramdisk00/init" 2>/dev/null || echo "missing")
+            echo "ERROR: build/out/$MODEL/boot_ramdisk00/init staging lost execute bit! Current mode: $INIT_MODE" >&2
+            abort
+        fi
 
         pushd "build/out/$MODEL/boot_ramdisk00" > /dev/null
         find . ! -name . | LC_ALL=C sort | cpio -o -H newc -R root:root | lz4 -l > ../boot_ramdisk || abort
@@ -326,8 +380,8 @@ build_boot()
             --header_version 3 \
             --cmdline "$GHOST_KERNEL_CMDLINE" \
             --ramdisk "build/out/$MODEL/boot_ramdisk" \
-            --os_version 16.0.0 \
-            --os_patch_level 2025-11 \
+            --os_version 12.0.0 \
+            --os_patch_level 2024-08 \
             --kernel "build/out/$MODEL/Image" \
             --output "build/out/$MODEL/boot.img" || abort
     fi
@@ -429,9 +483,45 @@ build_modules()
 
     sed -i 's/\(kernel\/[^: ]*\/\)\([^: ]*\.ko\)/\/lib\/modules\/\2/g' "$KERNEL_DIR_PATH/modules.dep"
 
+    rm -rf "build/out/$MODEL/modules"
     mkdir -p "build/out/$MODEL/modules/lib/modules"
-    find "$KERNEL_DIR_PATH" -name '*.ko' -exec cp '{}' "build/out/$MODEL/modules/lib/modules" ';'
+
+    MODULES_MANIFEST="build/out/$MODEL/modules/lib/modules/modules_manifest.txt"
+    : > "$MODULES_MANIFEST"
+
+    declare -A SEEN_MODULES
+    MODULE_COLLISION=0
+
+    while IFS= read -r MOD_PATH; do
+        [ -z "$MOD_PATH" ] && continue
+        MOD_BASE=$(basename "$MOD_PATH")
+
+        # Handle known duplicate isg5320a.ko: drivers/sensors is official, sensors_lego is alternate
+        if [ "$MOD_BASE" = "isg5320a.ko" ] && [[ "$MOD_PATH" =~ "sensors_lego" ]]; then
+            echo "NOTICE: Resolved known module collision for '$MOD_BASE': selecting 'drivers/sensors' over 'sensors_lego'."
+            continue
+        fi
+
+        if [ -n "${SEEN_MODULES[$MOD_BASE]:-}" ]; then
+            echo "ERROR: Unresolved duplicate module basename collision detected: $MOD_BASE" >&2
+            echo "  Existing: ${SEEN_MODULES[$MOD_BASE]}" >&2
+            echo "  Conflict: $MOD_PATH" >&2
+            MODULE_COLLISION=1
+        else
+            SEEN_MODULES["$MOD_BASE"]="$MOD_PATH"
+            cp "$MOD_PATH" "build/out/$MODEL/modules/lib/modules/$MOD_BASE"
+            MOD_SHA=$(sha256sum "$MOD_PATH" | cut -d ' ' -f 1)
+            echo "$MOD_SHA  $MOD_BASE  ($MOD_PATH)" >> "$MODULES_MANIFEST"
+        fi
+    done < <(find "$KERNEL_DIR_PATH/kernel" -type f -name '*.ko' | LC_ALL=C sort)
+
+    if [ "$MODULE_COLLISION" -ne 0 ]; then
+        echo "FATAL: Module name collision in kernel tree! Aborting build." >&2
+        abort
+    fi
+
     cp "$KERNEL_DIR_PATH"/modules.{alias,dep,softdep,load} "build/out/$MODEL/modules/lib/modules"
+    cp -f "$MODULES_MANIFEST" "build/out/$MODEL/modules_manifest.txt"
 }
 
 build_vendor_boot()
@@ -459,7 +549,7 @@ build_vendor_boot()
         --ramdisk_offset 0x84000000 \
         --tags_offset 0x80000000 \
         --dtb_offset 0x0000000081F00000 \
-        --vendor_cmdline "$GHOST_KERNEL_CMDLINE" \
+        --vendor_cmdline "" \
         --board "$BOARD" \
         --dtb "build/out/$MODEL/dtb.img" \
         --vendor_ramdisk "build/out/$MODEL/vendor_ramdisk" \
@@ -477,16 +567,11 @@ build_zip()
 
     if [ ! -d "$AK3_DIR/.git" ]; then
         git clone -b "$AK3_BRANCH" "$AK3_REPO" "$AK3_DIR" || abort
-    else
-        git -C "$AK3_DIR" fetch origin "$AK3_BRANCH" || abort
-        git -C "$AK3_DIR" checkout "$AK3_BRANCH" || abort
-        git -C "$AK3_DIR" reset --hard "origin/$AK3_BRANCH" || abort
-        git -C "$AK3_DIR" clean -fd || abort
     fi
 
 # Do not restrict installation to Android 16; the o1s image is Android 12.
 sed -i '/^supported\.versions=16[[:space:]]*$/d' \
-    "$AK3_DIR/anykernel.sh" || abort
+    "$AK3_DIR/anykernel.sh" || true
 
     rm -f "$AK3_DIR/boot.img" "$AK3_DIR/vendor_boot.img" "$AK3_DIR/dtbo.img"
 
@@ -495,6 +580,38 @@ sed -i '/^supported\.versions=16[[:space:]]*$/d' \
     [ -f "build/out/$MODEL/vendor_boot.img" ] && cp "build/out/$MODEL/vendor_boot.img" "$AK3_DIR/"
 
     [[ "$MODEL" != "t2s" ]] && sed -i "s/^device\.name1=.*/device.name1=$MODEL/" "$AK3_DIR/anykernel.sh"
+
+    if ! grep -q "bootstat/build_date" "$AK3_DIR/anykernel.sh"; then
+        cat << 'AKBOOTSTAT' >> "$AK3_DIR/anykernel.sh"
+
+# Best-effort bootstat timestamp initialization if decrypted userdata is mounted
+DATA_MOUNTED=0
+if mountpoint -q /data 2>/dev/null; then
+  DATA_MOUNTED=1
+elif mount /data 2>/dev/null || mount /dev/block/by-name/userdata /data 2>/dev/null; then
+  DATA_MOUNTED=2
+fi
+
+if [ $DATA_MOUNTED -ne 0 ]; then
+  # Verify /data is decrypted and accessible before attempting write
+  if [ -d /data/misc ] && [ -w /data/misc ]; then
+    mkdir -p /data/misc/bootstat 2>/dev/null || true
+    if [ ! -f /data/misc/bootstat/build_date ]; then
+      if echo -n "1640081434" > /data/misc/bootstat/build_date 2>/dev/null; then
+        chmod 0644 /data/misc/bootstat/build_date 2>/dev/null || true
+        chown root:root /data/misc/bootstat/build_date 2>/dev/null || true
+        ui_print "  • Bootstat build_date initialized"
+      fi
+    fi
+  else
+    ui_print "  • Notice: /data is encrypted or misc not writable; skipping bootstat injection"
+  fi
+  if [ $DATA_MOUNTED -eq 2 ]; then
+    umount /data 2>/dev/null || true
+  fi
+fi
+AKBOOTSTAT
+    fi
 
     pushd "$AK3_DIR" > /dev/null
 

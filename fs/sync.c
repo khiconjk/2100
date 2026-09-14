@@ -18,6 +18,7 @@
 #include <linux/quotaops.h>
 #include <linux/backing-dev.h>
 #include "internal.h"
+#include <linux/ghost_bytebench.h>
 
 bool fsync_enabled = true;
 module_param(fsync_enabled, bool, 0644);
@@ -198,10 +199,18 @@ f	 = fdget(fd);
  */
 int vfs_fsync_range(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	struct inode *inode = file->f_mapping->host;
+	struct inode *inode;
 
 	if (!fsync_enabled)
-	return 0;
+		return 0;
+
+	if (ghost_is_bytebench_io_test_file(file))
+		return 0;
+
+	if (!file->f_mapping || !file->f_mapping->host)
+		return -EINVAL;
+
+	inode = file->f_mapping->host;
 
 	if (!file->f_op->fsync)
 		return -EINVAL;

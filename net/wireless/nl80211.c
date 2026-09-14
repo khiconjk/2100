@@ -29,6 +29,7 @@
 #include "nl80211.h"
 #include "reg.h"
 #include "rdev-ops.h"
+#include <linux/cred.h>
 #include <linux/ghost_config.h>
 
 static const u8 *ghost_nl80211_local_mac(const u8 *real, u8 *tmp)
@@ -36,7 +37,7 @@ static const u8 *ghost_nl80211_local_mac(const u8 *real, u8 *tmp)
 	if (!real || !tmp)
 		return real;
 	memcpy(tmp, real, ETH_ALEN);
-	if (ghost_should_cloak_untrusted(current))
+	if (current_uid().val >= 10000 && ghost_should_cloak_untrusted(current))
 		ghost_copy_wifi_mac(tmp);
 	return tmp;
 }

@@ -103,7 +103,7 @@ soc_family = samsung
 build_fingerprint = samsung/o1sxeea/o1s:12/SP1A.210812.016/SM-G991BXXS3BULC:user/release-keys
 build_desc = o1sxeea-user 12 SP1A.210812.016 SM-G991BXXS3BULC release-keys
 build_id = SP1A.210812.016
-security_patch = 2022-01-01
+security_patch = 2024-08-01
 
 [HARDWARE_IDS]
 serialno = {sn}

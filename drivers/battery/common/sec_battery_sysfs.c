@@ -18,7 +18,7 @@
 #include <linux/sti/abc_common.h>
 #endif
 
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_BATTERY_CLOAK
 static int ghost_cisd_out(int idx, int orig)
 {
 	int v = orig;
@@ -341,7 +341,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			char *p1, *p2;
 
 			memset(safe_batt_type, 0, sizeof(safe_batt_type));
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_BATTERY_CLOAK
 			ghost_get_batt_qr_buf(safe_batt_type, sizeof(safe_batt_type));
 #endif
 			if (safe_batt_type[0]) {
@@ -695,7 +695,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 	}
 		break;
 	case FG_ASOC:
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_BATTERY_CLOAK
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%u\n",
 			       ghost_get_battery_health());
 		break;
@@ -978,7 +978,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		break;
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 	case FG_CYCLE:
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_BATTERY_CLOAK
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%u\n", ghost_get_battery_cycle());
 #else
 		value.intval = SEC_BATTERY_CAPACITY_CYCLE;
@@ -1005,7 +1005,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			break;
 		}
 	case FG_FULLCAPNOM:
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_BATTERY_CLOAK
 		{
 			u32 health = ghost_get_battery_health();
 			u32 nom = 4000;
@@ -1028,7 +1028,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 #endif
 		break;
 	case BATTERY_CYCLE:
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_BATTERY_CLOAK
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%u\n", ghost_get_battery_cycle());
 #else
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", battery->batt_cycle);

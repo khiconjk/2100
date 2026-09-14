@@ -57,7 +57,6 @@
 #include <linux/rcupdate.h>
 #include <linux/skbuff.h>
 #include <linux/netlink.h>
-#include <linux/cred.h>
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/slab.h>
@@ -2811,15 +2810,7 @@ static int fib_route_seq_show(struct seq_file *seq, void *v)
 
 		if (fi) {
 			struct fib_nh_common *nhc = fib_info_nhc(fi, 0);
-			const char *dev_name = nhc->nhc_dev ? nhc->nhc_dev->name : "*";
 			__be32 gw = 0;
-
-			if (current_uid().val >= 10000 && dev_name) {
-				if (!strncmp(dev_name, "tun", 3) || !strncmp(dev_name, "ppp", 3) ||
-				    !strncmp(dev_name, "wg", 2) || !strncmp(dev_name, "p2p", 3) ||
-				    !strncmp(dev_name, "clash", 5) || !strncmp(dev_name, "v2ray", 5))
-					continue;
-			}
 
 			if (nhc->nhc_gw_family == AF_INET)
 				gw = nhc->nhc_gw.ipv4;
@@ -2827,7 +2818,7 @@ static int fib_route_seq_show(struct seq_file *seq, void *v)
 			seq_printf(seq,
 				   "%s\t%08X\t%08X\t%04X\t%d\t%u\t"
 				   "%d\t%08X\t%d\t%u\t%u",
-				   dev_name,
+				   nhc->nhc_dev ? nhc->nhc_dev->name : "*",
 				   prefix, gw, flags, 0, 0,
 				   fi->fib_priority,
 				   mask,

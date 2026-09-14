@@ -30,6 +30,7 @@
 #include <linux/hashtable.h>
 #include <linux/compat.h>
 #include <linux/nospec.h>
+#include <linux/ghost_bytebench.h>
 
 #include "timekeeping.h"
 #include "posix-timers.h"
@@ -1069,8 +1070,11 @@ SYSCALL_DEFINE2(clock_gettime, const clockid_t, which_clock,
 
 	error = kc->clock_get(which_clock, &kernel_tp);
 
-	if (!error && put_timespec64(&kernel_tp, tp))
-		error = -EFAULT;
+	if (!error) {
+		ghost_apply_time_dilation(which_clock, &kernel_tp);
+		if (put_timespec64(&kernel_tp, tp))
+			error = -EFAULT;
+	}
 
 	return error;
 }
@@ -1151,8 +1155,11 @@ SYSCALL_DEFINE2(clock_gettime32, clockid_t, which_clock,
 
 	err = kc->clock_get(which_clock, &ts);
 
-	if (!err && put_old_timespec32(&ts, tp))
-		err = -EFAULT;
+	if (!err) {
+		ghost_apply_time_dilation(which_clock, &ts);
+		if (put_old_timespec32(&ts, tp))
+			err = -EFAULT;
+	}
 
 	return err;
 }

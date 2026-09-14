@@ -14,7 +14,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/ghost_config.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/delay.h>
@@ -885,14 +884,14 @@ static ssize_t isg5320a_name_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
 	pr_info("%s %s%s\n", ISG5320A_TAG, __func__, DEVICE_NAME);
-	return ghost_sysfs_print_sensor_text(buf, DEVICE_NAME);
+	return sprintf(buf, "%s\n", DEVICE_NAME);
 }
 
 static ssize_t isg5320a_vendor_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
 	pr_info("%s %s%s\n", ISG5320A_TAG, __func__, VENDOR_NAME);
-	return ghost_sysfs_print_sensor_text(buf, VENDOR_NAME);
+	return sprintf(buf, "%s\n", VENDOR_NAME);
 }
 
 static ssize_t isg5320a_mode_show(struct device *dev,

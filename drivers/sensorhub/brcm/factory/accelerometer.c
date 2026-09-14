@@ -14,7 +14,6 @@
  */
 #include "../ssp.h"
 #include "sensors.h"
-#include <linux/ghost_config.h>
 
 /*************************************************************************/
 /* factory Sysfs							 */
@@ -182,13 +181,13 @@ int accel_do_calibrate(struct ssp_data *data, int iEnable, const int max_accel_1
 static ssize_t accel_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return ghost_sysfs_print_sensor_text(buf, get_accel(dev)->vendor);
+	return sprintf(buf, "%s\n", get_accel(dev)->vendor);
 }
 
 static ssize_t accel_name_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    return ghost_sysfs_print_sensor_text(buf, get_accel(dev)->name);
+    return sprintf(buf, "%s\n", get_accel(dev)->name);
 }
 
 static ssize_t accel_calibration_show(struct device *dev,

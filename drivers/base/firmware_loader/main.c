@@ -34,8 +34,6 @@
 #include <linux/reboot.h>
 #include <linux/security.h>
 #include <linux/xz.h>
-#include <linux/cred.h>
-#include <linux/init_task.h>
 
 #include <generated/utsrelease.h>
 
@@ -448,7 +446,6 @@ static int fw_decompress_xz(struct device *dev, struct fw_priv *fw_priv,
 static char fw_path_para[256];
 static const char * const fw_path[] = {
 	fw_path_para,
-	"/vendor/firmware",
 	"/lib/firmware/updates/" UTS_RELEASE,
 	"/lib/firmware/updates",
 	"/lib/firmware/" UTS_RELEASE,
@@ -491,8 +488,6 @@ fw_get_filesystem_firmware(struct device *device, struct fw_priv *fw_priv,
 		return -ENOMEM;
 
 	for (i = 0; i < ARRAY_SIZE(fw_path); i++) {
-		const struct cred *old_cred;
-
 		/* skip the unset customized path */
 		if (!fw_path[i][0])
 			continue;
@@ -505,10 +500,8 @@ fw_get_filesystem_firmware(struct device *device, struct fw_priv *fw_priv,
 		}
 
 		fw_priv->size = 0;
-		old_cred = override_creds(&init_cred);
 		rc = kernel_read_file_from_path(path, &buffer, &size,
 						msize, id);
-		revert_creds(old_cred);
 		if (rc) {
 			if (rc != -ENOENT)
 				dev_warn(device, "loading %s failed with error %d\n",

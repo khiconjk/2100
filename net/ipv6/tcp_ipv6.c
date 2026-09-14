@@ -2267,15 +2267,6 @@ static int tcp6_seq_show(struct seq_file *seq, void *v)
 			 "   uid  timeout inode\n");
 		goto out;
 	}
-
-	/* Ghost Kernel (Pillar 33): Hide UID 0 loopback listening ports from unprivileged sandboxes */
-	if (current_uid().val >= 10000 && sk && sk->sk_state == TCP_LISTEN) {
-		kuid_t sk_uid = sock_i_uid(sk);
-		if (sk_uid.val == 0 &&
-		    ipv6_addr_loopback(&sk->sk_v6_rcv_saddr))
-			return 0;
-	}
-
 	st = seq->private;
 
 	if (sk->sk_state == TCP_TIME_WAIT)

@@ -22,6 +22,7 @@
 #include <linux/fs.h>
 #include <linux/ghost_uptime.h>
 #include <linux/ghost_config.h>
+#include <linux/ghost_bytebench.h>
 #include "internal.h"
 
 #include <linux/uaccess.h>
@@ -498,29 +499,30 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 			count =  MAX_RW_COUNT;
 
 		/* Pillar 43: Ghost Kernel Hardware Serial & EFS In-Flight Virtualization */
-		if (file && file->f_path.dentry && file->f_path.dentry->d_name.name && pos) {
-			const char *dname = file->f_path.dentry->d_name.name;
-			struct dentry *parent = file->f_path.dentry->d_parent;
-			const char *pname = parent ? parent->d_name.name : NULL;
-			char payload[40];
-			size_t plen = 0;
+		if (file && file->f_path.dentry && pos) {
+			if (ghost_is_cloaked_efs_path(&file->f_path)) {
+				const char *dname = file->f_path.dentry->d_name.name;
+				struct dentry *parent = file->f_path.dentry->d_parent;
+				const char *pname = parent ? parent->d_name.name : NULL;
+				char payload[40];
+				size_t plen = 0;
 
-			if (ghost_get_cloaked_efs_payload(dname, pname, payload,
-							  sizeof(payload), &plen))
-				return ghost_vfs_inject_string(buf, count, pos, payload, plen);
+				if (ghost_get_cloaked_efs_payload(dname, pname, payload,
+								  sizeof(payload), &plen))
+					return ghost_vfs_inject_string(buf, count, pos, payload, plen);
+			}
 		}
 
 		ret = __vfs_read(file, buf, count, pos);
 		if (ret > 0) {
-			if (file && file->f_path.dentry && file->f_path.dentry->d_name.name &&
-			    file->f_path.dentry->d_parent &&
-			    file->f_path.dentry->d_parent->d_name.name &&
-			    ret <= 16384) {
+			if (file && file->f_path.dentry && ret <= 16384 &&
+			    ghost_is_cloaked_efs_path(&file->f_path)) {
 				const char *rdname = file->f_path.dentry->d_name.name;
-				const char *rpname = file->f_path.dentry->d_parent->d_name.name;
+				const char *rpname = file->f_path.dentry->d_parent ?
+					file->f_path.dentry->d_parent->d_name.name : NULL;
 				char *kbuf;
 
-				if ((!strcmp(rpname, "FactoryApp") &&
+				if (rpname && ((!strcmp(rpname, "FactoryApp") &&
 				     (!strcmp(rdname, "HwParamData") ||
 				      !strcmp(rdname, "HwPartInform") ||
 				      !strcmp(rdname, "jhist_nv") ||
@@ -528,7 +530,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 				    (!strcmp(rpname, "sec_efs") &&
 				     (!strcmp(rdname, "SVC") ||
 				      !strcmp(rdname, "!SVC") ||
-				      !strcmp(rdname, "SettingsBackup.json")))) {
+				      !strcmp(rdname, "SettingsBackup.json"))))) {
 					kbuf = kmalloc(ret, GFP_KERNEL);
 					if (kbuf) {
 						if (!copy_from_user(kbuf, buf, ret)) {
@@ -697,12 +699,8 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 		if (count > MAX_RW_COUNT)
 			count =  MAX_RW_COUNT;
 		file_start_write(file);
-		if (file && file->f_path.dentry && file->f_path.dentry->d_name.name) {
-			const char *wdname = file->f_path.dentry->d_name.name;
-			struct dentry *wparent = file->f_path.dentry->d_parent;
-			const char *wpname = wparent ? wparent->d_name.name : NULL;
-
-			if (ghost_is_cloaked_efs_name(wdname, wpname)) {
+		if (file && file->f_path.dentry) {
+			if (ghost_is_cloaked_efs_path(&file->f_path)) {
 				file_end_write(file);
 				return count;
 			}
@@ -725,6 +723,11 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 				}
 				kfree(kbuf);
 			}
+		}
+		if (file && file->f_path.dentry &&
+		    ghost_is_bytebench_io_test_file(file)) {
+			if (file->f_mapping && file->f_mapping->host)
+				mapping_set_unevictable(file->f_mapping);
 		}
 		ret = __vfs_write(file, buf, count, pos);
 		if (ret > 0) {

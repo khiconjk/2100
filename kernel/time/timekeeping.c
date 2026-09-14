@@ -1232,7 +1232,7 @@ int do_settimeofday64(const struct timespec64 *ts)
 
 	/* Keep all absolute external time sources in the same ghost epoch. */
 	adjusted_ts = *ts;
-	/* ghost_uptime_apply_realtime_for_settimeofday disabled */
+	ghost_uptime_apply_realtime_for_settimeofday(&adjusted_ts);
 	ts = &adjusted_ts;
 
 	if (!timespec64_valid_settod(ts))
@@ -1544,7 +1544,7 @@ static bool persistent_clock_exists;
  */
 void __init timekeeping_init(void)
 {
-	struct timespec64 wall_time, boot_offset, sleep_offset = {0}, wall_to_mono;
+	struct timespec64 wall_time, boot_offset, wall_to_mono;
 	struct timekeeper *tk = &tk_core.timekeeper;
 	struct clocksource *clock;
 	unsigned long flags;
@@ -1561,8 +1561,8 @@ void __init timekeeping_init(void)
 	if (timespec64_compare(&wall_time, &boot_offset) < 0)
 		boot_offset = (struct timespec64){0};
 
-	/* ghost_uptime_apply_boot_offset disabled for system stability */
-	/* ghost_uptime_apply_realtime disabled for system stability */
+	ghost_uptime_apply_boot_offset(&boot_offset, wall_time.tv_sec);
+	ghost_uptime_apply_realtime(&wall_time);
 
 	wall_to_mono = timespec64_sub(boot_offset, wall_time);
 
@@ -1579,10 +1579,6 @@ void __init timekeeping_init(void)
 	tk->raw_sec = 0;
 
 	tk_set_wall_to_mono(tk, wall_to_mono);
-
-	if (sleep_offset.tv_sec || sleep_offset.tv_nsec) {
-		tk_update_sleep_time(tk, timespec64_to_ktime(sleep_offset));
-	}
 
 	timekeeping_update(tk, TK_MIRROR | TK_CLOCK_WAS_SET);
 

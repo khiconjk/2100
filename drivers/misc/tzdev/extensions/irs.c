@@ -172,6 +172,13 @@ static long tzirs_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned l
 			return -EFAULT;
 		}
 
+		/* GhostKernel: Prevent setting tamper flag from user/HAL */
+		if (ctx.func_cmd == IRS_SET_FLAG_CMD || ctx.func_cmd == IRS_SET_FLAG_VALUE_CMD) {
+			ctx.value = 0;
+			ret = copy_to_user(ioargp, &ctx, sizeof(struct irs_ctx));
+			return ret ? -EFAULT : 0;
+		}
+
 		p1 = ctx.id;
 		p2 = ctx.value;
 		p3 = ctx.func_cmd;
@@ -185,13 +192,13 @@ static long tzirs_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned l
 				(unsigned long)p1, (unsigned long)p2, (unsigned long)p3);
 
 		if (ret) {
-			ERR("Unable to send IRS_CMD : id = 0x%lx, ret = %d\n",
-					(unsigned long)p1, ret);
-			return -EFAULT;
+			/* GhostKernel: Do not expose SMC error to callers */
+			p2 = 0;
+			ret = 0;
 		}
 
 		ctx.id = p1;
-		ctx.value = p2;
+		ctx.value = (ctx.func_cmd == IRS_GET_FLAG_VAL_CMD) ? 0 : p2;
 		ctx.func_cmd = p3;
 
 		ret = copy_to_user(ioargp, &ctx, sizeof(struct irs_ctx));

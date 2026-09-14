@@ -395,9 +395,173 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
  * parsing is performed in place, and we should allow a component to
  * store reference of name/value for future reference.
  */
+
+static inline bool is_boot_token_boundary(const char *buf, const char *p)
+{
+	return (p == buf || *(p - 1) == ' ');
+}
+
+static void __init sanitize_boot_args(char *buf, size_t capacity)
+{
+#if !IS_ENABLED(CONFIG_GHOST_KERNEL)
+	return;
+#else
+	char *p;
+	if (!buf || capacity == 0)
+		return;
+
+	/* 1. verifiedbootstate: orange/yellow/red -> green */
+	p = buf;
+	while ((p = strstr(p, "androidboot.verifiedbootstate=orange"))) {
+		if (!is_boot_token_boundary(buf, p)) {
+			p += 36;
+			continue;
+		}
+		if (p[36] == ' ' || p[36] == '\0') {
+			memcpy(p + 30, "green", 5);
+			memmove(p + 35, p + 36, strlen(p + 36) + 1);
+		}
+		p += 35;
+	}
+	p = buf;
+	while ((p = strstr(p, "androidboot.verifiedbootstate=yellow"))) {
+		if (!is_boot_token_boundary(buf, p)) {
+			p += 36;
+			continue;
+		}
+		if (p[36] == ' ' || p[36] == '\0') {
+			memcpy(p + 30, "green", 5);
+			memmove(p + 35, p + 36, strlen(p + 36) + 1);
+		}
+		p += 35;
+	}
+	p = buf;
+	while ((p = strstr(p, "androidboot.verifiedbootstate=red"))) {
+		if (!is_boot_token_boundary(buf, p)) {
+			p += 33;
+			continue;
+		}
+		if (p[33] == ' ' || p[33] == '\0') {
+			size_t cur_len = strlen(buf);
+			if (cur_len + 2 < capacity) {
+				memmove(p + 35, p + 33, strlen(p + 33) + 1);
+				memcpy(p + 30, "green", 5);
+				p += 35;
+			} else {
+				break;
+			}
+		} else {
+			p += 33;
+		}
+	}
+
+	/* 2. flash.locked: 0 -> 1 */
+	p = buf;
+	while ((p = strstr(p, "androidboot.flash.locked=0"))) {
+		*(p + 25) = '1';
+		p += 26;
+	}
+
+	/* 3. warranty_bit: 1 -> 0 */
+	p = buf;
+	while ((p = strstr(p, "androidboot.warranty_bit=1"))) {
+		*(p + 25) = '0';
+		p += 26;
+	}
+	p = buf;
+	while ((p = strstr(p, "sec_debug.warranty_bit=1"))) {
+		*(p + 23) = '0';
+		p += 24;
+	}
+
+	/* 4. kg.state & ro.boot.kg: 0x6 -> 0x0, Prenormal -> Completed */
+	p = buf;
+	while ((p = strstr(p, "androidboot.kg=0x6"))) {
+		memcpy(p + 15, "0x0", 3);
+		p += 18;
+	}
+	p = buf;
+	while ((p = strstr(p, "sec_debug.kg=0x6"))) {
+		memcpy(p + 13, "0x0", 3);
+		p += 16;
+	}
+	p = buf;
+	while ((p = strstr(p, "kg=0x6"))) {
+		memcpy(p + 3, "0x0", 3);
+		p += 6;
+	}
+	/* 4b. kg.state: Prenormal -> Completed */
+	p = buf;
+	while ((p = strstr(p, "androidboot.kg.state=Prenormal"))) {
+		memcpy(p + 21, "Completed", 9);
+		p += 30;
+	}
+	p = buf;
+	while ((p = strstr(p, "sec_debug.kg.state=Prenormal"))) {
+		memcpy(p + 19, "Completed", 9);
+		p += 28;
+	}
+	p = buf;
+	while ((p = strstr(p, "knox.kg.state=Prenormal"))) {
+		memcpy(p + 14, "Completed", 9);
+		p += 23;
+	}
+	p = buf;
+	while ((p = strstr(p, "kg.state=Prenormal"))) {
+		memcpy(p + 9, "Completed", 9);
+		p += 18;
+	}
+
+		/* 6. ulcnt: unlock count -> 0 */
+	p = buf;
+	while ((p = strstr(p, "androidboot.ulcnt="))) {
+		char *val = p + 18;
+		while (*val >= '0' && *val <= '9') {
+			*val = ' ';
+			val++;
+		}
+		*(p + 18) = '0';
+		p = val;
+	}
+
+	/* 5. vbmeta.device_state: unlocked -> locked */
+	p = buf;
+	while ((p = strstr(p, "androidboot.vbmeta.device_state=unlocked"))) {
+		memcpy(p + 32, "locked  ", 8);
+		p += 40;
+	}
+
+	/* 7. security_patch: synchronize to 2024-08-01 */
+	p = buf;
+	while ((p = strstr(p, "androidboot.version.security_patch="))) {
+		if (strlen(p + 35) >= 10)
+			memcpy(p + 35, "2024-08-01", 10);
+		p += 45;
+	}
+	p = buf;
+	while ((p = strstr(p, "androidboot.security_patch="))) {
+		if (strlen(p + 27) >= 10)
+			memcpy(p + 27, "2024-08-01", 10);
+		p += 37;
+	}
+	if (!strstr(buf, "androidboot.version.security_patch=")) {
+		size_t clen = strlen(buf);
+		const char append_patch[] = " androidboot.version.security_patch=2024-08-01";
+		if (clen + sizeof(append_patch) < capacity)
+			strcat(buf, append_patch);
+	}
+#endif
+}
+
 static void __init setup_command_line(char *command_line)
 {
-	size_t len = strlen(boot_command_line) + 1;
+	size_t len;
+
+	sanitize_boot_args(boot_command_line, COMMAND_LINE_SIZE);
+	sanitize_boot_args(command_line, COMMAND_LINE_SIZE);
+
+	len = strlen(boot_command_line) + 1;
+
 
 	saved_command_line = memblock_alloc(len, SMP_CACHE_BYTES);
 	if (!saved_command_line)

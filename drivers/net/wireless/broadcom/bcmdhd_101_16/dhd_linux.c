@@ -10409,7 +10409,7 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 #ifdef GET_CUSTOM_MAC_ENABLE
 	ret = wifi_platform_get_mac_addr(dhd->info->adapter, ea_addr.octet);
 	if (!ret) {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 		ghost_copy_wifi_mac(ea_addr.octet);
 #endif
 		ret = dhd_iovar(dhd, 0, "cur_etheraddr", (char *)&ea_addr, ETHER_ADDR_LEN, NULL, 0,
@@ -10431,7 +10431,7 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 			goto done;
 		}
 
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 		ghost_copy_wifi_mac((u8 *)&buf);
 #endif
 		DHD_ERROR(("%s: use firmware generated mac_address "MACDBG"\n",
@@ -10456,7 +10456,7 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 	} else {
 		(void)memcpy_s(dhd_linux_get_primary_netdev(dhd)->perm_addr, ETHER_ADDR_LEN,
 			dhd->mac.octet, ETHER_ADDR_LEN);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 		{
 			u8 gmac[ETH_ALEN];
 
@@ -11254,7 +11254,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef GET_CUSTOM_MAC_ENABLE
 	ret = wifi_platform_get_mac_addr(dhd->info->adapter, ea_addr.octet);
 	if (!ret) {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 		ghost_copy_wifi_mac(ea_addr.octet);
 #endif
 		ret = dhd_iovar(dhd, 0, "cur_etheraddr", (char *)&ea_addr, ETHER_ADDR_LEN, NULL, 0,
@@ -11276,7 +11276,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 			goto done;
 		}
 
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 		ghost_copy_wifi_mac((u8 *)&buf);
 #endif
 		DHD_ERROR(("%s: use firmware generated mac_address "MACDBG"\n",
@@ -11301,7 +11301,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	} else {
 		(void)memcpy_s(dhd_linux_get_primary_netdev(dhd)->perm_addr, ETHER_ADDR_LEN,
 			dhd->mac.octet, ETHER_ADDR_LEN);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 		{
 			u8 gmac[ETH_ALEN];
 

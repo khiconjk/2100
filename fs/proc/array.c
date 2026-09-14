@@ -92,7 +92,6 @@
 #include <linux/user_namespace.h>
 #include <linux/fs_struct.h>
 #include <linux/ghost_uptime.h>
-#include <linux/ghost_procfs.h>
 
 #include <asm/processor.h>
 #include "internal.h"
@@ -190,11 +189,7 @@ static inline void task_state(struct seq_file *m, struct pid_namespace *ns,
 	seq_put_decimal_ull(m, "\nNgid:\t", ngid);
 	seq_put_decimal_ull(m, "\nPid:\t", pid_nr_ns(pid, ns));
 	seq_put_decimal_ull(m, "\nPPid:\t", ppid);
-	/* Ghost Kernel (Pillar 33): Mask TracerPid for untrusted app sandboxes */
-	if (ghost_is_untrusted_app())
-		seq_put_decimal_ull(m, "\nTracerPid:\t", 0);
-	else
-		seq_put_decimal_ull(m, "\nTracerPid:\t", tpid);
+	seq_put_decimal_ull(m, "\nTracerPid:\t", tpid);
 	seq_put_decimal_ull(m, "\nUid:\t", from_kuid_munged(user_ns, cred->uid));
 	seq_put_decimal_ull(m, "\t", from_kuid_munged(user_ns, cred->euid));
 	seq_put_decimal_ull(m, "\t", from_kuid_munged(user_ns, cred->suid));

@@ -1259,8 +1259,6 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	susfs_spoof_uname(&tmp);
 #endif
-	strncpy(tmp.version, "#1 SMP PREEMPT Mon Dec 06 17:22:42 KST 2021", sizeof(tmp.version) - 1);
-	tmp.version[sizeof(tmp.version) - 1] = '\0';
 
 #ifndef CONFIG_FAKE_UNAME_NONE
 	if (!strncmp(current->comm, "bpfloader", 9) ||

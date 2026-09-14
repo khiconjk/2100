@@ -7,13 +7,21 @@
 #include <linux/uidgid.h>
 #include <linux/string.h>
 
+#ifndef GHOST_STEALTH
+#define GHOST_STEALTH 0
+#endif
+
 #ifdef CONFIG_KSU_SUSFS
 extern bool susfs_is_current_ksu_domain(void);
 #endif
 
 static inline bool ghost_is_untrusted_app(void)
 {
+#if !GHOST_STEALTH
+	return false;
+#else
 	return (current_uid().val >= 10000);
+#endif
 }
 
 static inline bool ghost_is_sensitive_task_name(const char *comm)
@@ -56,6 +64,9 @@ static inline bool ghost_is_sensitive_task(struct task_struct *task)
 
 static inline bool ghost_can_see_pid(struct task_struct *target)
 {
+#if !GHOST_STEALTH
+	return true;
+#else
 	kuid_t cur_uid = current_uid();
 
 	/* System UIDs (root, system, adb shell, etc.) have full visibility */
@@ -79,6 +90,7 @@ static inline bool ghost_can_see_pid(struct task_struct *target)
 		return false;
 
 	return true;
+#endif
 }
 
 #endif /* _LINUX_GHOST_PROCFS_H */

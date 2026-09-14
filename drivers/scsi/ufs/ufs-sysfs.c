@@ -226,7 +226,7 @@ static ssize_t ufs_sysfs_read_desc_param(struct ufs_hba *hba,
 	if (param_size > 8)
 		return -EINVAL;
 
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	if (desc_id == QUERY_DESC_IDN_DEVICE && param_size == 2 &&
 	    param_offset == DEVICE_DESC_PARAM_MANF_DATE) {
 		ghost_get_ufs_manf_date(&manf_date);
@@ -605,7 +605,7 @@ static const struct attribute_group ufs_sysfs_power_descriptor_group = {
 
 static inline ssize_t ghost_ufs_spoof_descriptor(const char *name, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	if (!strcmp(name, "manufacturer_name")) {
 		return snprintf(buf, PAGE_SIZE, "SAMSUNG\n");
 	} else if (!strcmp(name, "product_name")) {

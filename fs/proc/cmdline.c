@@ -14,24 +14,64 @@
 extern int susfs_spoof_cmdline_or_bootconfig(struct seq_file *m);
 #endif
 
-static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
+static inline bool is_cmd_token_boundary(const char *buf, const char *p)
 {
+	return (p == buf || *(p - 1) == ' ');
+}
+
+static void sanitize_cmdline_output(char *buf, size_t capacity, const struct ghost_profile *prof)
+{
+#if !IS_ENABLED(CONFIG_GHOST_KERNEL)
+	return;
+#else
 	char *p;
-	if (!buf)
+	if (!buf || capacity == 0)
 		return;
 
+#if GHOST_CMDLINE_CLOAK
 	/* 1. verifiedbootstate: orange/yellow/red -> green */
-	while ((p = strstr(buf, "androidboot.verifiedbootstate=orange"))) {
-		memcpy(p + 30, "green", 5);
-		memmove(p + 35, p + 36, strlen(p + 36) + 1);
+	p = buf;
+	while ((p = strstr(p, "androidboot.verifiedbootstate=orange"))) {
+		if (!is_cmd_token_boundary(buf, p)) {
+			p += 36;
+			continue;
+		}
+		if (p[36] == ' ' || p[36] == '\0') {
+			memcpy(p + 30, "green", 5);
+			memmove(p + 35, p + 36, strlen(p + 36) + 1);
+		}
+		p += 35;
 	}
-	while ((p = strstr(buf, "androidboot.verifiedbootstate=yellow"))) {
-		memcpy(p + 30, "green", 5);
-		memmove(p + 35, p + 36, strlen(p + 36) + 1);
+	p = buf;
+	while ((p = strstr(p, "androidboot.verifiedbootstate=yellow"))) {
+		if (!is_cmd_token_boundary(buf, p)) {
+			p += 36;
+			continue;
+		}
+		if (p[36] == ' ' || p[36] == '\0') {
+			memcpy(p + 30, "green", 5);
+			memmove(p + 35, p + 36, strlen(p + 36) + 1);
+		}
+		p += 35;
 	}
-	while ((p = strstr(buf, "androidboot.verifiedbootstate=red"))) {
-		memcpy(p + 30, "green", 5);
-		memmove(p + 35, p + 33, strlen(p + 33) + 1);
+	p = buf;
+	while ((p = strstr(p, "androidboot.verifiedbootstate=red"))) {
+		if (!is_cmd_token_boundary(buf, p)) {
+			p += 33;
+			continue;
+		}
+		if (p[33] == ' ' || p[33] == '\0') {
+			size_t cur_len = strlen(buf);
+			if (cur_len + 2 < capacity) {
+				memmove(p + 35, p + 33, strlen(p + 33) + 1);
+				memcpy(p + 30, "green", 5);
+				p += 35;
+			} else {
+				break;
+			}
+		} else {
+			p += 33;
+		}
 	}
 
 	/* 2. warranty_bit: 1 -> 0 */
@@ -151,6 +191,8 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 		}
 	}
 
+#endif /* GHOST_CMDLINE_CLOAK */
+
 	/* 9. Align serialno */
 	{
 		const char *target_sn = (prof && prof->serialno[0]) ?
@@ -158,16 +200,30 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 		size_t sn_len = strlen(target_sn);
 		p = buf;
 		while ((p = strstr(p, "androidboot.serialno="))) {
-			char *val = p + 21;
-			char *space = strchr(val, ' ');
-			size_t old_len = space ? (size_t)(space - val) : strlen(val);
+			char *val, *space;
+			size_t old_len;
+
+			if (!is_cmd_token_boundary(buf, p)) {
+				p += 21;
+				continue;
+			}
+			val = p + 21;
+			space = strchr(val, ' ');
+			old_len = space ? (size_t)(space - val) : strlen(val);
 			if (old_len == sn_len) {
 				memcpy(val, target_sn, sn_len);
+				p = val + sn_len;
 			} else {
-				memmove(val + sn_len, val + old_len, strlen(val + old_len) + 1);
-				memcpy(val, target_sn, sn_len);
+				size_t cur_len = strlen(buf);
+				if (sn_len <= old_len || cur_len + (sn_len - old_len) < capacity) {
+					memmove(val + sn_len, val + old_len, strlen(val + old_len) + 1);
+					memcpy(val, target_sn, sn_len);
+					p = val + sn_len;
+				} else {
+					p = val + old_len;
+					break;
+				}
 			}
-			p = val + sn_len;
 		}
 	}
 
@@ -178,23 +234,37 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 		size_t ap_len = strlen(target_ap);
 		p = buf;
 		while ((p = strstr(p, "androidboot.ap_serial="))) {
-			char *val = p + 22;
-			char *space = strchr(val, ' ');
-			size_t old_len = space ? (size_t)(space - val) : strlen(val);
+			char *val, *space;
+			size_t old_len;
+
+			if (!is_cmd_token_boundary(buf, p)) {
+				p += 22;
+				continue;
+			}
+			val = p + 22;
+			space = strchr(val, ' ');
+			old_len = space ? (size_t)(space - val) : strlen(val);
 			if (old_len == ap_len) {
 				memcpy(val, target_ap, ap_len);
+				p = val + ap_len;
 			} else {
-				memmove(val + ap_len, val + old_len, strlen(val + old_len) + 1);
-				memcpy(val, target_ap, ap_len);
+				size_t cur_len = strlen(buf);
+				if (ap_len <= old_len || cur_len + (ap_len - old_len) < capacity) {
+					memmove(val + ap_len, val + old_len, strlen(val + old_len) + 1);
+					memcpy(val, target_ap, ap_len);
+					p = val + ap_len;
+				} else {
+					p = val + old_len;
+					break;
+				}
 			}
-			p = val + ap_len;
 		}
 		p = buf;
 		while ((p = strstr(p, "ap_serial="))) {
-			char *val;
-			char *space;
+			char *val, *space;
 			size_t old_len;
-			if (p > buf && *(p - 1) == '.') {
+
+			if (!is_cmd_token_boundary(buf, p)) {
 				p += 10;
 				continue;
 			}
@@ -203,11 +273,18 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 			old_len = space ? (size_t)(space - val) : strlen(val);
 			if (old_len == ap_len) {
 				memcpy(val, target_ap, ap_len);
+				p = val + ap_len;
 			} else {
-				memmove(val + ap_len, val + old_len, strlen(val + old_len) + 1);
-				memcpy(val, target_ap, ap_len);
+				size_t cur_len = strlen(buf);
+				if (ap_len <= old_len || cur_len + (ap_len - old_len) < capacity) {
+					memmove(val + ap_len, val + old_len, strlen(val + old_len) + 1);
+					memcpy(val, target_ap, ap_len);
+					p = val + ap_len;
+				} else {
+					p = val + old_len;
+					break;
+				}
 			}
-			p = val + ap_len;
 		}
 	}
 
@@ -218,23 +295,37 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 		size_t did_len = strlen(target_did);
 		p = buf;
 		while ((p = strstr(p, "androidboot.em.did="))) {
-			char *val = p + 19;
-			char *space = strchr(val, ' ');
-			size_t old_len = space ? (size_t)(space - val) : strlen(val);
+			char *val, *space;
+			size_t old_len;
+
+			if (!is_cmd_token_boundary(buf, p)) {
+				p += 19;
+				continue;
+			}
+			val = p + 19;
+			space = strchr(val, ' ');
+			old_len = space ? (size_t)(space - val) : strlen(val);
 			if (old_len == did_len) {
 				memcpy(val, target_did, did_len);
+				p = val + did_len;
 			} else {
-				memmove(val + did_len, val + old_len, strlen(val + old_len) + 1);
-				memcpy(val, target_did, did_len);
+				size_t cur_len = strlen(buf);
+				if (did_len <= old_len || cur_len + (did_len - old_len) < capacity) {
+					memmove(val + did_len, val + old_len, strlen(val + old_len) + 1);
+					memcpy(val, target_did, did_len);
+					p = val + did_len;
+				} else {
+					p = val + old_len;
+					break;
+				}
 			}
-			p = val + did_len;
 		}
 		p = buf;
 		while ((p = strstr(p, "em.did="))) {
-			char *val;
-			char *space;
+			char *val, *space;
 			size_t old_len;
-			if (p > buf && *(p - 1) == '.') {
+
+			if (!is_cmd_token_boundary(buf, p)) {
 				p += 7;
 				continue;
 			}
@@ -243,20 +334,35 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 			old_len = space ? (size_t)(space - val) : strlen(val);
 			if (old_len == did_len) {
 				memcpy(val, target_did, did_len);
+				p = val + did_len;
 			} else {
-				memmove(val + did_len, val + old_len, strlen(val + old_len) + 1);
-				memcpy(val, target_did, did_len);
+				size_t cur_len = strlen(buf);
+				if (did_len <= old_len || cur_len + (did_len - old_len) < capacity) {
+					memmove(val + did_len, val + old_len, strlen(val + old_len) + 1);
+					memcpy(val, target_did, did_len);
+					p = val + did_len;
+				} else {
+					p = val + old_len;
+					break;
+				}
 			}
-			p = val + did_len;
 		}
 	}
 
+#if GHOST_CMDLINE_CLOAK
 	/* 12. Align bore_cnt (boot count) */
 	p = buf;
 	while ((p = strstr(p, "androidboot.bore_cnt="))) {
-		char *val = p + 21;
-		char *space = strchr(val, ' ');
-		size_t old_len = space ? (size_t)(space - val) : strlen(val);
+		char *val, *space;
+		size_t old_len;
+
+		if (!is_cmd_token_boundary(buf, p)) {
+			p += 21;
+			continue;
+		}
+		val = p + 21;
+		space = strchr(val, ' ');
+		old_len = space ? (size_t)(space - val) : strlen(val);
 		if (old_len >= 1) {
 			*val = '3';
 			if (old_len > 1)
@@ -264,9 +370,9 @@ static void sanitize_cmdline_output(char *buf, const struct ghost_profile *prof)
 		}
 		p = val + 1;
 	}
+#endif
 
-	/* Same-length cloak for lcdtype / panel id / snapQB / ulcnt / hashes. */
-#if __has_include(<linux/ghost_config.h>)
+	/* Serial/AP/EM stay cloaked even when extra cmdline cloak is off. */
 	ghost_sanitize_bootargs(buf, strlen(buf) + 1);
 #endif
 }
@@ -279,8 +385,10 @@ static int cmdline_proc_show(struct seq_file *m, void *v)
 		return 0;
 	}
 #endif
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
 	if (saved_command_line) {
-		char *buf = kstrdup(saved_command_line, GFP_KERNEL);
+		size_t capacity = strlen(saved_command_line) + 1024;
+		char *buf = kzalloc(capacity, GFP_KERNEL);
 		if (buf) {
 			struct ghost_profile snap;
 			const char *target_boot_hash;
@@ -289,17 +397,16 @@ static int cmdline_proc_show(struct seq_file *m, void *v)
 			const char *target_ap_serial;
 			const char *target_em_did;
 
+			strscpy(buf, saved_command_line, capacity);
 			memset(&snap, 0, sizeof(snap));
-#if __has_include(<linux/ghost_config.h>)
 			ghost_get_profile_snapshot(&snap);
-#endif
 			target_boot_hash = snap.boot_hash[0] ? snap.boot_hash : "7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1";
 			target_boot_key = snap.boot_key[0] ? snap.boot_key : "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781";
 			target_serialno = snap.serialno[0] ? snap.serialno : "R5CR0000000";
 			target_ap_serial = snap.ap_serial[0] ? snap.ap_serial : "0x979BE420021A";
 			target_em_did = snap.em_did[0] ? snap.em_did : "20979be420021a11";
 
-			sanitize_cmdline_output(buf, &snap);
+			sanitize_cmdline_output(buf, capacity, &snap);
 			seq_printf(m, "%s", buf);
 			if (!strstr(buf, "androidboot.serialno="))
 				seq_printf(m, " androidboot.serialno=%s", target_serialno);
@@ -307,6 +414,7 @@ static int cmdline_proc_show(struct seq_file *m, void *v)
 				seq_printf(m, " androidboot.ap_serial=%s", target_ap_serial);
 			if (!strstr(buf, "androidboot.em.did="))
 				seq_printf(m, " androidboot.em.did=%s", target_em_did);
+#if GHOST_CMDLINE_CLOAK
 			if (!strstr(buf, "androidboot.bore_cnt="))
 				seq_puts(m, " androidboot.bore_cnt=3");
 			if (!strstr(buf, "androidboot.bootreason="))
@@ -329,11 +437,13 @@ static int cmdline_proc_show(struct seq_file *m, void *v)
 				seq_puts(m, " androidboot.vbmeta.avb_version=1.2");
 			if (!strstr(buf, "androidboot.vbmeta.hash_alg="))
 				seq_puts(m, " androidboot.vbmeta.hash_alg=sha256");
+#endif
 			seq_putc(m, '\n');
 			kfree(buf);
 			return 0;
 		}
 	}
+#endif
 	seq_printf(m, "%s\n", saved_command_line ? saved_command_line : "");
 	return 0;
 }

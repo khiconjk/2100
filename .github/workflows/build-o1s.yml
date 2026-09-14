@@ -25,6 +25,11 @@ on:
     paths:
       - ".github/workflows/**"
       - "build.sh"
+      - "build_kernel.sh"
+      - "package_all.sh"
+      - "run_full_build_v14.sh"
+      - "Makefile"
+      - "Kconfig"
       - "ghost.conf"
       - "patches/**"
       - "arch/**"
@@ -45,8 +50,8 @@ on:
       - "virt/**"
       - "dt.configs/**"
       - "build/ramdisk/**"
-      - "scripts/generate_ghost.py"
-      - "scripts/random_ghost.sh"
+      - "scripts/**"
+      - "tests/**"
 
 concurrency:
   group: o1s-kernel-${{ github.workflow }}-${{ github.ref }}
@@ -127,7 +132,7 @@ jobs:
             git curl wget tar xz-utils zip unzip \
             build-essential bc bison flex \
             libssl-dev libelf-dev dwarves pahole \
-            python3 python3-pip \
+            python3 python3-pip python3-yaml \
             cpio lz4 gzip kmod rsync ca-certificates patch
 
       - name: Verify Ghost patch sources
@@ -137,17 +142,29 @@ jobs:
           test -f include/linux/ghost_procfs.h
           test -f include/linux/ghost_config.h
           test -f include/linux/ghost_uptime.h
+          test -f include/linux/ghost_bytebench.h
           test -f kernel/ghost_config.c
           test -f kernel/ghost_uptime.c
+          test -f kernel/ghost_bytebench.c
           test -f ghost.conf
           test -f patches/enable-susfs.patch
           test -f arch/arm64/configs/o1s.config
           test -f arch/arm64/configs/ksu.config
           test -f arch/arm64/configs/susfs.config
-          grep -q 'ghost_can_see_pid' fs/proc/base.c
+          test -f arch/arm64/configs/nosusfs.config
+          grep -q 'exynos_chipid_sync_ghost' drivers/soc/samsung/exynos-chipid_v2.c
           grep -q 'androidboot.boot_hash=7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1' build.sh
           grep -q 'androidboot.verifiedbootkey=22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781' build.sh
           echo "Ghost kernel sources and locked boot_hash/boot_key are present."
+
+      - name: Run safety and packaging tests
+        run: |
+          set -euxo pipefail
+          echo "===== RUN BUILD SAFETY TESTS ====="
+          chmod +x tests/test_b02_modules.sh tests/test_b03_packaging.sh
+          bash tests/test_b02_modules.sh
+          bash tests/test_b03_packaging.sh
+          python3 tests/validate_ci.py
 
       - name: Hard clean old build outputs
         run: |
@@ -157,7 +174,7 @@ jobs:
           rm -f build.log Module.symvers modules.order .scmversion
           # GNU find: -delete implies -depth and cannot be combined with -prune.
           find . \
-            ! -path './.git/*' ! -path './toolchain/*' ! -path './clang/*' \
+            ! -path './.git/*' ! -path './toolchain/*' ! -path './clang/*' ! -path './KernelSU-Next/*' \
             \( -name '*.o' -o -name '*.mod' -o -name '*.mod.c' -o -name '.*.cmd' -o -name '*.a' -o -name '.tmp_*' \) \
             -type f -delete
           df -h
@@ -248,7 +265,7 @@ jobs:
           path.write_text(text.replace(old, new, 1), encoding="utf-8")
           PY
           echo "===== VERIFY BUILD.SH PATCH ====="
-          grep -n "clang-r596125\\|vendor_ramdisk\\|MODEl\\|submodule\\|name \\\"\\*.a\\\"" build.sh || true
+          grep -n "clang-r596125\|vendor_ramdisk\|MODEl\|submodule\|name \"\*.a\"" build.sh || true
 
       - name: Final clean before build
         run: |

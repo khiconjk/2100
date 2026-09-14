@@ -215,6 +215,25 @@ static void chipid_dec_to_36(u32 in, char *p)
 	p[5] = 0;
 }
 
+#if GHOST_CHIPID_CLOAK
+static void exynos_chipid_sync_ghost(u64 new_uid)
+{
+	u32 temp;
+
+	if (!new_uid)
+		return;
+
+	exynos_soc_info.unique_id = new_uid;
+	exynos_soc_info.lot_id = (u32)(new_uid & EXYNOS_LOTID_MASK);
+
+	temp = (u32)(new_uid & 0xFFFFFFFF);
+	temp = chipid_reverse_value(temp, 32);
+	temp = (temp >> 11) & EXYNOS_LOTID_MASK;
+	chipid_dec_to_36(temp, lot_id);
+	exynos_soc_info.lot_id2 = lot_id;
+}
+#endif
+
 /*
  *  sysfs implementation for exynos-snapshot
  *  you can access the sysfs of exynos-snapshot to /sys/devices/system/chip-id
@@ -234,10 +253,12 @@ static ssize_t product_id_show(struct device *dev,
 static ssize_t unique_id_show(struct device *dev,
 			         struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_CHIPID_CLOAK
 	u64 gid = ghost_get_active_unique_id();
-	if (gid)
+	if (gid) {
+		exynos_chipid_sync_ghost(gid);
 		return snprintf(buf, 20, "%016llX\n", gid);
+	}
 #endif
 	return snprintf(buf, 20, "%010LX\n", exynos_soc_info.unique_id);
 }
@@ -245,10 +266,12 @@ static ssize_t unique_id_show(struct device *dev,
 static ssize_t lot_id_show(struct device *dev,
 			         struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_CHIPID_CLOAK
 	u64 gid = ghost_get_active_unique_id();
-	if (gid)
+	if (gid) {
+		exynos_chipid_sync_ghost(gid);
 		return snprintf(buf, 14, "%08llX\n", (gid & EXYNOS_LOTID_MASK));
+	}
 #endif
 	return snprintf(buf, 14, "%08X\n", exynos_soc_info.lot_id);
 }
@@ -256,7 +279,7 @@ static ssize_t lot_id_show(struct device *dev,
 static ssize_t lot_id2_show(struct device *dev,
 			         struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_CHIPID_CLOAK
 	char lot[8];
 
 	memset(lot, 0, sizeof(lot));
@@ -313,10 +336,12 @@ static const struct attribute_group *chipid_sysfs_groups[] = {
 static ssize_t SVC_AP_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_CHIPID_CLOAK
 	u64 gid = ghost_get_active_unique_id();
-	if (gid)
-		return snprintf(buf, 20, "%010llX\n", gid);
+	if (gid) {
+		exynos_chipid_sync_ghost(gid);
+		return snprintf(buf, 20, "%016llX\n", gid);
+	}
 #endif
 	return snprintf(buf, 20, "%010llX\n",
 			(exynos_soc_info.unique_id));
@@ -446,7 +471,7 @@ static void exynos_chipid_get_chipid_info(void)
 
 	val = __raw_readl(exynos_soc_info.reg + data->unique_id_reg);
 	val |= (u64)__raw_readl(exynos_soc_info.reg + data->unique_id_reg + 4) << 32UL;
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_CHIPID_CLOAK
 	if (ghost_get_active_unique_id())
 		val = ghost_get_active_unique_id();
 #endif
@@ -521,6 +546,11 @@ static int exynos_chipid_probe(struct platform_device *pdev)
 	exynos_soc_info.pdev = pdev;
 
 	chipid_sysfs_init();
+#if GHOST_CHIPID_CLOAK
+	ghost_chipid_sync_fn = exynos_chipid_sync_ghost;
+	if (ghost_get_active_unique_id())
+		exynos_chipid_sync_ghost(ghost_get_active_unique_id());
+#endif
 	return 0;
 free_rev:
 	kfree(soc_dev_attr->revision);

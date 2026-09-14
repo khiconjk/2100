@@ -3209,20 +3209,198 @@ static void ghost_binder_cloak_imei_parcel(struct binder_alloc *alloc,
 
 static int ghost_binder_pkt_has_device_unique_id(const u8 *pkt, int len)
 {
-	static const char needle[] = "deviceUniqueId";
-	int n = 14;
+	static const char * const needles[] = {
+		"deviceuniqueid",
+		"device_unique_id",
+	};
+	int k;
+
+	if (!pkt || len < 14)
+		return 0;
+
+	for (k = 0; k < ARRAY_SIZE(needles); k++) {
+		const char *needle = needles[k];
+		int n = strlen(needle);
+		int i, j;
+
+		/* ASCII case-insensitive search */
+		for (i = 0; i + n <= len; i++) {
+			for (j = 0; j < n; j++) {
+				char c = (char)pkt[i + j];
+				if (c >= 'A' && c <= 'Z')
+					c += 32;
+				if (c != needle[j])
+					break;
+			}
+			if (j == n)
+				return 1;
+		}
+
+		/* UTF-16 case-insensitive search */
+		for (i = 0; i + n * 2 <= len; i++) {
+			for (j = 0; j < n; j++) {
+				u16 ch;
+				memcpy(&ch, pkt + i + j * 2, 2);
+				if (ch >= 'A' && ch <= 'Z')
+					ch += 32;
+				if (ch != (u16)needle[j])
+					break;
+			}
+			if (j == n)
+				return 1;
+		}
+	}
+	return 0;
+}
+
+static size_t ghost_binder_buffer_total_size(struct binder_buffer *buffer)
+{
+	size_t total;
+	size_t extra_off;
+
+	if (!buffer)
+		return 0;
+	total = buffer->data_size;
+	if (buffer->extra_buffers_size) {
+		extra_off = ALIGN(buffer->data_size, sizeof(void *));
+		extra_off = ALIGN(extra_off + buffer->offsets_size, sizeof(void *));
+		if (extra_off + buffer->extra_buffers_size >= extra_off)
+			total = extra_off + buffer->extra_buffers_size;
+	}
+	return total;
+}
+
+static int ghost_binder_request_is_drm_unique(struct binder_alloc *alloc,
+					      struct binder_buffer *buffer)
+{
+	u8 pkt[1024];
+	size_t total_len;
+	size_t copy_len;
+
+	if (!alloc || !buffer)
+		return 0;
+	total_len = ghost_binder_buffer_total_size(buffer);
+	if (total_len < 16)
+		return 0;
+	copy_len = total_len > sizeof(pkt) ? sizeof(pkt) : total_len;
+	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
+		return 0;
+	return ghost_binder_pkt_has_device_unique_id(pkt, (int)copy_len);
+}
+
+static void ghost_binder_cloak_drm_parcel(struct binder_alloc *alloc,
+					  struct binder_buffer *buffer)
+{
+	size_t data_len;
+	size_t offsets_size;
+	size_t total_size;
+	bool cloaked = false;
+
+	if (!alloc || !buffer)
+		return;
+
+	data_len = buffer->data_size;
+	offsets_size = buffer->offsets_size;
+	total_size = ghost_binder_buffer_total_size(buffer);
+
+	/* Priority 1: HwBinder (HIDL) scatter-gather child buffer.
+	 * In HIDL, vec<uint8_t> has a parent BINDER_TYPE_PTR (hidl_vec struct, 16 bytes)
+	 * and a child BINDER_TYPE_PTR (data buffer, 32 bytes for Widevine L1 deviceUniqueId).
+	 * We inspect the objects directly from the offsets array and cloak ONLY the payload buffer.
+	 */
+	if (offsets_size >= sizeof(binder_size_t)) {
+		size_t off_start = ALIGN(data_len, sizeof(void *));
+		size_t num_objects = offsets_size / sizeof(binder_size_t);
+		size_t i;
+
+		for (i = 0; i < num_objects; i++) {
+			binder_size_t obj_off = 0;
+			struct binder_object_header hdr;
+			struct binder_buffer_object bbo;
+
+			if (binder_alloc_copy_from_buffer(alloc, &obj_off, buffer,
+							  off_start + i * sizeof(binder_size_t),
+							  sizeof(obj_off)))
+				continue;
+
+			if (binder_alloc_copy_from_buffer(alloc, &hdr, buffer, obj_off,
+							  sizeof(hdr)))
+				continue;
+
+			if (hdr.type != BINDER_TYPE_PTR)
+				continue;
+
+			if (binder_alloc_copy_from_buffer(alloc, &bbo, buffer, obj_off,
+							  sizeof(bbo)))
+				continue;
+
+			/* Widevine deviceUniqueId is 32 bytes (or 16 bytes for L3/legacy) */
+			if (bbo.length == 32 || (bbo.length == 16 && (bbo.flags & BINDER_BUFFER_FLAG_HAS_PARENT))) {
+				if (bbo.buffer >= (uintptr_t)buffer->user_data) {
+					binder_size_t rel_off = (binder_size_t)(bbo.buffer - (uintptr_t)buffer->user_data);
+
+					if (rel_off + bbo.length <= total_size) {
+						u8 cloaked_id[32];
+
+						ghost_fill_drm_id(cloaked_id, bbo.length);
+						if (!binder_alloc_copy_to_buffer(alloc, buffer, rel_off,
+										 cloaked_id, bbo.length)) {
+							pr_info_ratelimited("GhostKernel: cloaked HIDL DRM id len=%zu at off=%llu\n",
+									    (size_t)bbo.length, (u64)rel_off);
+							cloaked = true;
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/* Priority 2: Java Binder / AIDL inline byte array (offsets_size == 0) */
+	if (!cloaked && offsets_size == 0 && data_len >= 12 && data_len <= 4096) {
+		u8 pkt[1024];
+		size_t copy_len = data_len > sizeof(pkt) ? sizeof(pkt) : data_len;
+		int n;
+
+		if (!binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len)) {
+			n = ghost_cloak_drm_reply_bytes(pkt, copy_len);
+			if (n > 0) {
+				if (!binder_alloc_copy_to_buffer(alloc, buffer, 0, pkt, copy_len)) {
+					pr_info_ratelimited("GhostKernel: cloaked AIDL DRM id len=%d\n", n);
+					cloaked = true;
+				}
+			}
+		}
+	}
+}
+
+static int ghost_binder_pkt_has_security_level(const u8 *pkt, int len)
+{
+	static const char needle[] = "securitylevel";
+	int n = 13;
 	int i, j;
 	u16 ch;
 
 	if (!pkt || len < n)
 		return 0;
+	/* ASCII case-insensitive search */
 	for (i = 0; i + n <= len; i++) {
-		if (!memcmp(pkt + i, needle, n))
+		for (j = 0; j < n; j++) {
+			char c = (char)pkt[i + j];
+			if (c >= 'A' && c <= 'Z')
+				c += 32;
+			if (c != needle[j])
+				break;
+		}
+		if (j == n)
 			return 1;
 	}
+	/* UTF-16 case-insensitive search */
 	for (i = 0; i + n * 2 <= len; i++) {
 		for (j = 0; j < n; j++) {
 			memcpy(&ch, pkt + i + j * 2, 2);
+			if (ch >= 'A' && ch <= 'Z')
+				ch += 32;
 			if (ch != (u16)needle[j])
 				break;
 		}
@@ -3232,75 +3410,78 @@ static int ghost_binder_pkt_has_device_unique_id(const u8 *pkt, int len)
 	return 0;
 }
 
-static int ghost_binder_request_is_drm_unique(struct binder_alloc *alloc,
-					      struct binder_buffer *buffer)
+static int ghost_binder_request_is_drm_security_level(struct binder_alloc *alloc,
+						      struct binder_buffer *buffer)
 {
-	u8 pkt[512];
+	u8 pkt[2048];
+	size_t total_len;
 	size_t copy_len;
 
-	if (!alloc || !buffer || buffer->data_size < 16)
+	if (!alloc || !buffer)
 		return 0;
-	copy_len = buffer->data_size;
-	if (copy_len > sizeof(pkt))
-		copy_len = sizeof(pkt);
+	total_len = ghost_binder_buffer_total_size(buffer);
+	if (total_len < 13)
+		return 0;
+	copy_len = total_len > sizeof(pkt) ? sizeof(pkt) : total_len;
 	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
 		return 0;
-	return ghost_binder_pkt_has_device_unique_id(pkt, (int)copy_len);
+	return ghost_binder_pkt_has_security_level(pkt, (int)copy_len);
 }
 
-static void ghost_binder_cloak_drm_parcel(struct binder_alloc *alloc,
-					  struct binder_buffer *buffer)
+static inline bool ghost_is_security_level_boundary(u8 c)
 {
-	u8 *pkt;
-	size_t data_len;
-	size_t extra_off;
-	size_t extra_len;
+	return c == 0 || c <= 0x20 || c == '"' || c == '\'' || c == '=' ||
+	       c == ':' || c == ',' || c == '}' || c == ']' || c == ';' ||
+	       c == '/' || c == '>' || c == '<' || c == '\\';
+}
+
+static void ghost_binder_cloak_security_level_parcel(struct binder_alloc *alloc,
+						     struct binder_buffer *buffer)
+{
+	u8 pkt[2048];
+	size_t total_len;
 	size_t copy_len;
-	int n;
+	int i;
+	bool modified = false;
 
 	if (!alloc || !buffer)
 		return;
-	data_len = buffer->data_size;
-	extra_len = buffer->extra_buffers_size;
-	extra_off = ALIGN(data_len, sizeof(void *));
-	extra_off = ALIGN(extra_off + buffer->offsets_size, sizeof(void *));
-	copy_len = data_len;
-	if (extra_len) {
-		if (extra_off + extra_len < extra_off)
-			return;
-		copy_len = extra_off + extra_len;
-	}
-	if (copy_len < 12 || copy_len > 8192)
+	total_len = ghost_binder_buffer_total_size(buffer);
+	if (total_len < 2)
 		return;
-	pkt = kmalloc(copy_len, GFP_KERNEL);
-	if (!pkt)
-		return;
+	copy_len = total_len > sizeof(pkt) ? sizeof(pkt) : total_len;
 	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
-		goto out;
-	n = 0;
-	if (data_len >= 12)
-		n = ghost_cloak_drm_reply_bytes(pkt, data_len);
-	if (!n && extra_len && extra_off + extra_len <= copy_len) {
-		if (extra_len == 16 || extra_len == 32 || extra_len == 64) {
-			ghost_fill_drm_id(pkt + extra_off, extra_len);
-			n = (int)extra_len;
-		} else {
-			n = ghost_cloak_drm_reply_bytes(pkt + extra_off, extra_len);
+		return;
+
+	/* Replace all UTF-16 "L3" (0x004c, 0x0033) or "l3" with "L1" */
+	for (i = 0; i + 3 < (int)copy_len; i++) {
+		if ((pkt[i] == 'L' || pkt[i] == 'l') && pkt[i + 1] == 0 &&
+		    pkt[i + 2] == '3' && pkt[i + 3] == 0) {
+			pkt[i + 2] = '1';
+			modified = true;
+			pr_info("GhostKernel: Cloaked Widevine securityLevel to L1 (UTF-16) at off=%d\n", i);
+			i += 3;
 		}
 	}
-	if (!n && copy_len != data_len)
-		n = ghost_cloak_drm_reply_bytes(pkt, copy_len);
-	if (n > 0) {
-		if (!binder_alloc_copy_to_buffer(alloc, buffer, 0, pkt, copy_len))
-			pr_info_ratelimited("GhostKernel: cloaked drm id len=%d\n", n);
-	} else if (copy_len <= 256) {
-		pr_info_ratelimited("GhostKernel: drm parcel skip size=%zu extra=%zu\n",
-				    copy_len, extra_len);
-	}
-out:
-	kfree(pkt);
-}
 
+	/* Replace all ASCII / UTF-8 "L3" with "L1" with boundary check */
+	for (i = 0; i + 1 < (int)copy_len; i++) {
+		if ((pkt[i] == 'L' || pkt[i] == 'l') && pkt[i + 1] == '3') {
+			bool valid_start = (i == 0 || ghost_is_security_level_boundary(pkt[i - 1]));
+			bool valid_end = (i + 2 == (int)copy_len || ghost_is_security_level_boundary(pkt[i + 2]));
+
+			if (valid_start && valid_end) {
+				pkt[i + 1] = '1';
+				modified = true;
+				pr_info("GhostKernel: Cloaked Widevine securityLevel to L1 (ASCII) at off=%d\n", i);
+				i += 1;
+			}
+		}
+	}
+
+	if (modified)
+		binder_alloc_copy_to_buffer(alloc, buffer, 0, pkt, copy_len);
+}
 
 static int ghost_binder_cmd_has(struct task_struct *task, const char *needle)
 {
@@ -3316,7 +3497,9 @@ static int ghost_binder_cmd_has(struct task_struct *task, const char *needle)
 	if (n >= (int)sizeof(cmd))
 		n = (int)sizeof(cmd) - 1;
 	cmd[n] = 0;
-	return strstr(cmd, needle) != NULL;
+	if (strstr(cmd, needle) != NULL)
+		return 1;
+	return strstr(task->comm, needle) != NULL;
 }
 
 static int ghost_binder_pkt_has_ascii(const u8 *pkt, int len, const char *needle)
@@ -3348,37 +3531,54 @@ static int ghost_binder_pkt_has_ascii(const u8 *pkt, int len, const char *needle
 
 static int ghost_binder_server_is_drm(struct binder_proc *proc)
 {
+	static const char * const needles[] = {
+		"widevine", "mediadrm", "media.drm",
+		"android.hardware.drm", "drmserver",
+		"drmService", "drm@1", "libmediadrm", NULL
+	};
+	char cmd[160];
+	int n, k;
+
 	if (!proc || !proc->tsk)
 		return 0;
-	if (ghost_binder_cmd_has(proc->tsk, "widevine"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "mediadrm"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "media.drm"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "android.hardware.drm"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "drmserver"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "drmService"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "drm@1"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "libmediadrm"))
-		return 1;
+	memset(cmd, 0, sizeof(cmd));
+	n = get_cmdline(proc->tsk, cmd, (int)sizeof(cmd) - 1);
+	if (n < 0)
+		n = 0;
+	if (n >= (int)sizeof(cmd))
+		n = (int)sizeof(cmd) - 1;
+	cmd[n] = 0;
+	for (k = 0; needles[k]; k++) {
+		if (strstr(cmd, needles[k]) ||
+		    strstr(proc->tsk->comm, needles[k]))
+			return 1;
+	}
 	return 0;
 }
 
 static int ghost_binder_server_is_sensor(struct binder_proc *proc)
 {
+	static const char * const needles[] = {
+		"android.hardware.sensors", "sensorservice",
+		"vendor.samsung.hardware.sensors", NULL
+	};
+	char cmd[160];
+	int n, k;
+
 	if (!proc || !proc->tsk)
 		return 0;
-	if (ghost_binder_cmd_has(proc->tsk, "android.hardware.sensors"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "sensorservice"))
-		return 1;
-	if (ghost_binder_cmd_has(proc->tsk, "vendor.samsung.hardware.sensors"))
-		return 1;
+	memset(cmd, 0, sizeof(cmd));
+	n = get_cmdline(proc->tsk, cmd, (int)sizeof(cmd) - 1);
+	if (n < 0)
+		n = 0;
+	if (n >= (int)sizeof(cmd))
+		n = (int)sizeof(cmd) - 1;
+	cmd[n] = 0;
+	for (k = 0; needles[k]; k++) {
+		if (strstr(cmd, needles[k]) ||
+		    strstr(proc->tsk->comm, needles[k]))
+			return 1;
+	}
 	return 0;
 }
 
@@ -3440,7 +3640,7 @@ static void ghost_binder_cloak_sensor_parcel(struct binder_alloc *alloc,
 	looks = ghost_binder_pkt_looks_like_sensor(head, (int)head_len);
 	if (!sensor_server && !looks)
 		return;
-	pkt = kmalloc(copy_len, GFP_KERNEL);
+	pkt = kmalloc(copy_len, GFP_ATOMIC);
 	if (!pkt)
 		return;
 	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
@@ -3469,6 +3669,13 @@ static int ghost_binder_server_is_wifi(struct binder_proc *proc)
 	return 0;
 }
 
+static inline bool ghost_target_is_untrusted_app(struct binder_proc *proc)
+{
+	if (!proc || !proc->tsk)
+		return false;
+	return task_uid(proc->tsk).val >= 10000;
+}
+
 static void ghost_binder_cloak_wifi_parcel(struct binder_alloc *alloc,
 					   struct binder_buffer *buffer)
 {
@@ -3483,7 +3690,7 @@ static void ghost_binder_cloak_wifi_parcel(struct binder_alloc *alloc,
 	copy_len = buffer->data_size;
 	if (copy_len < 24 || copy_len > 262144)
 		return;
-	pkt = kmalloc(copy_len, GFP_KERNEL);
+	pkt = kmalloc(copy_len, GFP_ATOMIC);
 	if (!pkt)
 		return;
 	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
@@ -3530,7 +3737,7 @@ static void ghost_binder_cloak_gaid_parcel(struct binder_alloc *alloc,
 	copy_len = buffer->data_size;
 	if (copy_len < 36 || copy_len > 65536)
 		return;
-	pkt = kmalloc(copy_len, GFP_KERNEL);
+	pkt = kmalloc(copy_len, GFP_ATOMIC);
 	if (!pkt)
 		return;
 	if (binder_alloc_copy_from_buffer(alloc, pkt, buffer, 0, copy_len))
@@ -4225,9 +4432,14 @@ static void binder_transaction(struct binder_proc *proc,
 	}
 #if __has_include(<linux/ghost_config.h>)
 	if (!reply && t->buffer) {
-		t->ghost_cloak_drm =
-			ghost_binder_request_is_drm_unique(&target_proc->alloc,
-							   t->buffer);
+		if (ghost_binder_server_is_drm(target_proc)) {
+			t->ghost_cloak_drm =
+				ghost_binder_request_is_drm_unique(&target_proc->alloc,
+								   t->buffer);
+			t->ghost_cloak_drm_level =
+				ghost_binder_request_is_drm_security_level(&target_proc->alloc,
+									   t->buffer);
+		}
 		t->ghost_cloak_gaid =
 			ghost_binder_request_is_gaid(&target_proc->alloc,
 						     t->buffer);
@@ -4235,24 +4447,38 @@ static void binder_transaction(struct binder_proc *proc,
 	if (reply) {
 		bool cloak_app = false;
 
-		ghost_binder_cloak_imei_parcel(&target_proc->alloc, t->buffer,
-					       in_reply_to ? in_reply_to->code : 0);
 		if (target_proc && target_proc->tsk)
 			cloak_app = ghost_should_cloak_untrusted(target_proc->tsk);
-		if (cloak_app && in_reply_to &&
-		    (in_reply_to->ghost_cloak_drm ||
-		     ghost_binder_server_is_drm(proc)))
-			ghost_binder_cloak_drm_parcel(&target_proc->alloc,
-						      t->buffer);
-		if (cloak_app && in_reply_to && in_reply_to->ghost_cloak_gaid)
-			ghost_binder_cloak_gaid_parcel(&target_proc->alloc,
-						       t->buffer);
-		if (cloak_app && ghost_binder_server_is_wifi(proc))
-			ghost_binder_cloak_wifi_parcel(&target_proc->alloc,
-						       t->buffer);
-		if (cloak_app)
+
+		if (cloak_app && in_reply_to) {
+			/* Widevine Security Level cloaking:
+			 * Applies strictly when replying to a securityLevel query
+			 */
+			if (in_reply_to->ghost_cloak_drm_level) {
+				ghost_binder_cloak_security_level_parcel(&target_proc->alloc,
+									 t->buffer);
+			}
+
+			/* Widevine DRM ID / deviceUniqueId cloaking:
+			 * Applies strictly when replying to a DRM unique ID query
+			 */
+			if (in_reply_to->ghost_cloak_drm) {
+				ghost_binder_cloak_drm_parcel(&target_proc->alloc,
+							      t->buffer);
+			}
+
+			ghost_binder_cloak_imei_parcel(&target_proc->alloc, t->buffer,
+						       in_reply_to->code);
+			if (in_reply_to->ghost_cloak_gaid)
+				ghost_binder_cloak_gaid_parcel(&target_proc->alloc,
+							       t->buffer);
+			if (ghost_binder_server_is_wifi(proc) &&
+			    ghost_target_is_untrusted_app(target_proc))
+				ghost_binder_cloak_wifi_parcel(&target_proc->alloc,
+							       t->buffer);
 			ghost_binder_cloak_sensor_parcel(&target_proc->alloc,
 							 t->buffer, proc);
+		}
 	}
 #endif
 	if (t->buffer->oneway_spam_suspect)

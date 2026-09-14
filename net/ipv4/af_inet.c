@@ -1874,7 +1874,7 @@ static __net_init int inet_init_net(struct net *net)
 	/* Default values for sysctl-controlled parameters.
 	 * We set them here, in case sysctl is not compiled.
 	 */
-	net->ipv4.sysctl_ip_default_ttl = 128;
+	net->ipv4.sysctl_ip_default_ttl = IPDEFTTL;
 	net->ipv4.sysctl_ip_fwd_update_priority = 1;
 	net->ipv4.sysctl_ip_dynaddr = 0;
 	net->ipv4.sysctl_ip_early_demux = 1;

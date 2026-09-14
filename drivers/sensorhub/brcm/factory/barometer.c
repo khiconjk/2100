@@ -14,7 +14,6 @@
  */
 #include "../ssp.h"
 #include "sensors.h"
-#include <linux/ghost_config.h>
 
 #define CALIBRATION_FILE_PATH		"/efs/FactoryApp/baro_delta"
 
@@ -118,13 +117,13 @@ static ssize_t pressure_selftest_show(struct device *dev,
 static ssize_t pressure_name_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return ghost_sysfs_print_sensor_text(buf, get_baro(dev)->name);
+	return sprintf(buf, "%s\n", get_baro(dev)->name);
 }
 
 static ssize_t pressure_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return ghost_sysfs_print_sensor_text(buf, get_baro(dev)->vendor);
+	return sprintf(buf, "%s\n", get_baro(dev)->vendor);
 }
 
 static ssize_t pressure_temperature_show(struct device *dev,

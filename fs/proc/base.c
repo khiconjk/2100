@@ -105,7 +105,6 @@
 #endif
 
 #include <linux/cn_proc.h>
-#include <linux/ghost_procfs.h>
 #include <trace/events/oom.h>
 #include "internal.h"
 #include "fd.h"
@@ -3690,12 +3689,6 @@ struct dentry *proc_pid_lookup(struct dentry *dentry, unsigned int flags)
 	if (!task)
 		goto out;
 
-	/* Ghost Kernel (Pillar 33): Stealth Procfs App-Sandbox Isolation */
-	if (!ghost_can_see_pid(task)) {
-		put_task_struct(task);
-		goto out;
-	}
-
 	result = proc_pid_instantiate(dentry, task, NULL);
 	put_task_struct(task);
 out:
@@ -3778,7 +3771,7 @@ int proc_pid_readdir(struct file *file, struct dir_context *ctx)
 		unsigned int len;
 
 		cond_resched();
-		if (!has_pid_permissions(ns, iter.task, HIDEPID_INVISIBLE) || !ghost_can_see_pid(iter.task))
+		if (!has_pid_permissions(ns, iter.task, HIDEPID_INVISIBLE))
 			continue;
 
 		len = snprintf(name, sizeof(name), "%u", iter.tgid);

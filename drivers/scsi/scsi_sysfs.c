@@ -660,8 +660,8 @@ static ssize_t
 sdev_show_vendor (struct device *dev, struct device_attribute *attr,
 		   char *buf)
 {
-	const char *v = "SAMSUNG ";
-	return snprintf (buf, 20, "%.8s\n", v);
+	struct scsi_device *sdev = to_scsi_device(dev);
+	return snprintf (buf, 20, "%.8s\n", sdev->vendor);
 }
 static DEVICE_ATTR(vendor, S_IRUGO, sdev_show_vendor, NULL);
 
@@ -669,9 +669,10 @@ static ssize_t
 sdev_show_model (struct device *dev, struct device_attribute *attr,
 		   char *buf)
 {
+	struct scsi_device *sdev = to_scsi_device(dev);
 	char model[32];
-	strscpy(model, "KLUDG8UHDB-C2D1 ", sizeof(model));
-#if __has_include(<linux/ghost_config.h>)
+	strscpy(model, sdev->model, sizeof(model));
+#if GHOST_UFS_CLOAK
 	ghost_get_ufs_model_buf(model, sizeof(model));
 #endif
 	return snprintf (buf, 20, "%.16s\n", model);
@@ -682,7 +683,8 @@ static ssize_t
 sdev_show_rev (struct device *dev, struct device_attribute *attr,
 		   char *buf)
 {
-	return snprintf (buf, 20, "%.4s\n", "0100");
+	struct scsi_device *sdev = to_scsi_device(dev);
+	return snprintf (buf, 20, "%.4s\n", sdev->rev);
 }
 static DEVICE_ATTR(rev, S_IRUGO, sdev_show_rev, NULL);
 
@@ -965,7 +967,7 @@ static ssize_t show_inquiry(struct file *filep, struct kobject *kobj,
 		if (n > sizeof(tmp))
 			n = sizeof(tmp);
 		memcpy(tmp, sdev->inquiry, n);
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 		if (n >= 36) {
 			memcpy(tmp + 8, "SAMSUNG ", 8);
 			memset(tmp + 16, ' ', 16);
@@ -1100,7 +1102,7 @@ sdev_show_wwid(struct device *dev, struct device_attribute *attr,
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
 	ssize_t count;
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_UFS_CLOAK
 	{
 		char wwid[40] = {0};
 		ghost_get_ufs_wwid_buf(wwid, sizeof(wwid));

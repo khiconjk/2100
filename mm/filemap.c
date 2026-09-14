@@ -2165,23 +2165,6 @@ static void shrink_readahead_size_eio(struct file *filp,
 	ra->ra_pages /= 4;
 }
 
-static inline void patch_scene_detector_page(struct file *file, struct page *page, pgoff_t offset)
-{
-	if (unlikely(file && file->f_path.dentry &&
-		     offset == (0x4c128 >> PAGE_SHIFT) &&
-		     !strcmp(file->f_path.dentry->d_name.name, "libSceneDetector_v1.camera.samsung.so"))) {
-		void *kaddr = page_address(page);
-		if (kaddr) {
-			u32 *insn = (u32 *)(kaddr + (0x4c128 & (PAGE_SIZE - 1)));
-			if (*insn == 0xd10403ff) {
-				*insn = 0xd65f03c0;
-				flush_dcache_page(page);
-				pr_info("camera_patch: live patched init_time_fuse in libSceneDetector_v1.camera.samsung.so!\n");
-			}
-		}
-	}
-}
-
 /**
  * generic_file_buffered_read - generic file read routine
  * @iocb:	the iocb to read
@@ -2335,7 +2318,7 @@ page_ok:
 		 * Ok, we have the page, and it's up-to-date, so
 		 * now we can copy it to user space...
 		 */
-		patch_scene_detector_page(filp, page, index);
+
 		ret = copy_page_to_iter(page, offset, nr, iter);
 		offset += ret;
 		index += offset >> PAGE_SHIFT;
@@ -2804,7 +2787,6 @@ retry_find:
 		return VM_FAULT_SIGBUS;
 	}
 
-	patch_scene_detector_page(file, page, offset);
 	vmf->page = page;
 	return ret | VM_FAULT_LOCKED;
 
@@ -2902,7 +2884,6 @@ void filemap_map_pages(struct vm_fault *vmf,
 		if (vmf->pte)
 			vmf->pte += xas.xa_index - last_pgoff;
 		last_pgoff = xas.xa_index;
-		patch_scene_detector_page(file, page, xas.xa_index);
 		if (alloc_set_pte(vmf, NULL, page))
 			goto unlock;
 		unlock_page(page);

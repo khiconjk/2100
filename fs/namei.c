@@ -50,7 +50,6 @@
 
 #include "internal.h"
 #include "mount.h"
-#include <linux/ghost_config.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/namei.h>
@@ -2868,8 +2867,6 @@ int path_pts(struct path *path)
 int user_path_at_empty(int dfd, const char __user *name, unsigned flags,
 		 struct path *path, int *empty)
 {
-	if (ghost_should_hide_user_path(name))
-		return -ENOENT;
 	return filename_lookup(dfd, getname_flags(name, flags, empty),
 			       flags, path, NULL);
 }

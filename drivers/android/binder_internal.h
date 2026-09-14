@@ -634,6 +634,7 @@ struct binder_transaction {
 	bool    is_nested;
 	kuid_t	sender_euid;
 	u8 ghost_cloak_drm;
+	u8 ghost_cloak_drm_level;
 	u8 ghost_cloak_gaid;
 	struct list_head fd_fixups;
 	binder_uintptr_t security_ctx;

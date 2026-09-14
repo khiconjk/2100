@@ -536,7 +536,6 @@ void __ip_select_ident(struct net *net, struct iphdr *iph, int segs)
 			    iph->protocol,
 			    &net->ipv4.ip_id_key);
 	id = ip_idents_reserve(hash, segs);
-	id ^= prandom_u32();
 	iph->id = htons(id);
 }
 EXPORT_SYMBOL(__ip_select_ident);

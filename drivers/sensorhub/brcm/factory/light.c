@@ -14,7 +14,6 @@
  */
 #include "../ssp.h"
 #include "sensors.h"
-#include <linux/ghost_config.h>
 
 #define LIGHT_CAL_PARAM_FILE_PATH	"/efs/FactoryApp/gyro_cal_data"
 #define LCD_PANEL_SVC_OCTA		"/sys/class/lcd/panel/SVC_OCTA"
@@ -40,13 +39,13 @@ struct light_t light_default = {
 static ssize_t light_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return ghost_sysfs_print_sensor_text(buf, get_light(dev)->vendor);
+	return sprintf(buf, "%s\n", get_light(dev)->vendor);
 }
 
 static ssize_t light_name_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return ghost_sysfs_print_sensor_text(buf, get_light(dev)->name);
+	return sprintf(buf, "%s\n", get_light(dev)->name);
 }
 
 static ssize_t light_lux_show(struct device *dev,

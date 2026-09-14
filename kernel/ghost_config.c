@@ -32,6 +32,7 @@
 #include <linux/pid_namespace.h>
 #include <linux/sched.h>
 #include <linux/ghost_config.h>
+#include <linux/ghost_bytebench.h>
 #include <linux/of.h>
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
@@ -40,7 +41,6 @@
 #include <asm/cacheflush.h>
 #include <linux/cred.h>
 #include <linux/etherdevice.h>
-#include <linux/mm.h>
 
 #ifndef F2FS_SUPER_MAGIC
 #define F2FS_SUPER_MAGIC 0xF2F52010
@@ -52,8 +52,10 @@
 
 struct ghost_profile ghost_active_profile;
 EXPORT_SYMBOL(ghost_active_profile);
-struct ghost_profile __rcu *ghost_active_profile_ptr;
+struct ghost_profile __rcu *ghost_active_profile_ptr = &ghost_active_profile;
 EXPORT_SYMBOL(ghost_active_profile_ptr);
+ghost_chipid_sync_fn_t ghost_chipid_sync_fn = NULL;
+EXPORT_SYMBOL(ghost_chipid_sync_fn);
 char ghost_spoofed_kernel_version[65] = "";
 EXPORT_SYMBOL(ghost_spoofed_kernel_version);
 
@@ -62,15 +64,6 @@ static DEFINE_MUTEX(ghost_reload_mutex);
 static struct delayed_work ghost_config_work;
 static int ghost_load_attempts = 0;
 #define GHOST_MAX_LOAD_ATTEMPTS 600
-
-#define GHOST_SEED_FILE_DATA     "/data/.ghost_seed"
-#define GHOST_SEED_FILE_DATA_SYS "/data/system/.ghost_seed"
-#define GHOST_SEED_FILE_DATA_ADB "/data/adb/.ghost_serial_seed"
-#define GHOST_SEED_FILE_EFS      "/efs/ghost_serial.txt"
-#define GHOST_FACTORY_EFS_1      "/efs/FactoryApp/serial_no"
-#define GHOST_FACTORY_EFS_2      "/mnt/vendor/efs/FactoryApp/serial_no"
-#define GHOST_PROP_SERIAL_FILE   "/dev/__properties__/u:object_r:serialno_prop:s0"
-#define GHOST_USB_GADGET_SERIAL  "/config/usb_gadget/g1/strings/0x409/serialnumber"
 
 /* Fixed salt: identity must change only with userdata UUID, not with every kernel flash. */
 #define GHOST_COMPILE_SALT        0x47524F5354313031ULL
@@ -234,7 +227,7 @@ static void ghost_format_iccid(char *out, size_t len, const char *prefix6, u64 s
 	strscpy(out, body, len);
 }
 
-static void ghost_fit_iccid_len(char *out, size_t olen, const char *src, int dstlen)
+static void __maybe_unused ghost_fit_iccid_len(char *out, size_t olen, const char *src, int dstlen)
 {
 	char body[24];
 	u64 mid;
@@ -260,9 +253,26 @@ static void ghost_fit_iccid_len(char *out, size_t olen, const char *src, int dst
 	strscpy(out, body, olen);
 }
 
+static int ghost_hex2bin(u8 *dst, const char *src, size_t count)
+{
+	size_t i;
+
+	if (!dst || !src)
+		return -EINVAL;
+	for (i = 0; i < count; i++) {
+		int h = hex_to_bin(src[i * 2]);
+		int l = hex_to_bin(src[i * 2 + 1]);
+		if (h < 0 || l < 0)
+			return -EINVAL;
+		dst[i] = (u8)((h << 4) | l);
+	}
+	return 0;
+}
+
 static void ghost_fill_unique_from_seed(struct ghost_profile *p, u64 seed)
 {
 	u64 ap, macmix, ufsmix, batmix, agemix, senmix;
+	u64 dmix[4];
 	int i;
 
 	if (!p)
@@ -270,7 +280,7 @@ static void ghost_fill_unique_from_seed(struct ghost_profile *p, u64 seed)
 
 	ghost_generate_samsung_serial(p->serialno, sizeof(p->serialno), seed);
 
-	ap = ghost_mix64(seed, 0xA15EULL) & 0xFFFFFFFFFFFFULL;
+	ap = ghost_mix64(seed, 0x534F435F4150534EULL) & 0xFFFFFFFFFFFFULL;
 	if (!ap)
 		ap = 1ULL;
 	snprintf(p->ap_serial, sizeof(p->ap_serial), "0x%012llX", ap);
@@ -310,6 +320,15 @@ static void ghost_fill_unique_from_seed(struct ghost_profile *p, u64 seed)
 	if (!ufsmix)
 		ufsmix = 1ULL;
 	snprintf(p->ufs_serial, sizeof(p->ufs_serial), "0x%08llx", ufsmix);
+
+	dmix[0] = ghost_mix64(seed, 0x44524D30ULL);
+	dmix[1] = ghost_mix64(seed, 0x44524D31ULL);
+	dmix[2] = ghost_mix64(seed, 0x44524D32ULL);
+	dmix[3] = ghost_mix64(seed, 0x44524D33ULL);
+	memcpy(p->device_unique_id_bytes, dmix, 32);
+	for (i = 0; i < 32; i++)
+		sprintf(p->device_unique_id + i * 2, "%02x", p->device_unique_id_bytes[i]);
+	p->device_unique_id[64] = '\0';
 
 	batmix = ghost_mix64(seed, 0xBA77000000000001ULL);
 	p->battery_cycle = 80 + (u32)(batmix % 141ULL);
@@ -441,6 +460,7 @@ static int __maybe_unused ghost_android_read_file(const char *rel_path, char *ou
 #define GHOST_PROP_VALUE_MAX     92
 #define GHOST_PROP_AREA_SERIAL   4
 
+#if GHOST_CELL_CLOAK
 static DEFINE_SPINLOCK(ghost_imei_seen_lock);
 static char ghost_seen_hw_imei1[16];
 static char ghost_seen_hw_imei2[16];
@@ -448,6 +468,7 @@ static char ghost_seen_hw_imsi1[16];
 static char ghost_seen_hw_imsi2[16];
 static char ghost_seen_hw_iccid1[24];
 static char ghost_seen_hw_iccid2[24];
+#endif
 
 static bool ghost_prop_name_is(const char *name, size_t nmax, const char *want)
 {
@@ -666,6 +687,10 @@ static int ghost_patch_prop_file_by_names(const char *rel_path, size_t vlen,
 				 buf[i + 5] == '0' && buf[i + 18] == '1' &&
 				 buf[i + 19] == '1')
 				r = 1;
+			else if (vlen == 10 && buf[i + 4] == '2' &&
+				 buf[i + 5] == '0' && buf[i + 8] == '-' &&
+				 buf[i + 11] == '-')
+				r = 1;
 			else
 				r = 0;
 			if (r) {
@@ -773,11 +798,19 @@ static int ghost_patch_property_ap_serial(const char *new_ap, const char *new_di
 	static const char *const ap_files[] = {
 		"dev/__properties__/u:object_r:ap_serial_prop:s0",
 		"dev/__properties__/u:object_r:bootloader_prop:s0",
+		"dev/__properties__/u:object_r:default_prop:s0",
+		"dev/__properties__/u:object_r:vendor_default_prop:s0",
+		"dev/__properties__/u:object_r:exported_default_prop:s0",
+		"dev/__properties__/u:object_r:system_prop:s0",
 		NULL
 	};
 	static const char *const did_files[] = {
 		"dev/__properties__/u:object_r:boot_em_did_prop:s0",
 		"dev/__properties__/u:object_r:bootloader_prop:s0",
+		"dev/__properties__/u:object_r:default_prop:s0",
+		"dev/__properties__/u:object_r:vendor_default_prop:s0",
+		"dev/__properties__/u:object_r:exported_default_prop:s0",
+		"dev/__properties__/u:object_r:system_prop:s0",
 		NULL
 	};
 	int i, total = 0;
@@ -803,27 +836,150 @@ static int ghost_patch_property_security_patch(const char *new_patch)
 		"ro.system_ext.build.version.security_patch",
 		"ro.product.build.version.security_patch",
 		"ro.odm.build.version.security_patch",
+		"ro.boot.version.security_patch",
+		"ro.boot.security_patch",
 		NULL
 	};
 	static const char *const files[] = {
 		"dev/__properties__/u:object_r:build_prop:s0",
+		"dev/__properties__/u:object_r:build_config_prop:s0",
+		"dev/__properties__/u:object_r:version_prop:s0",
+		"dev/__properties__/u:object_r:system_prop:s0",
+		"dev/__properties__/u:object_r:system_security_patch_level_prop:s0",
 		"dev/__properties__/u:object_r:vendor_security_patch_level_prop:s0",
 		"dev/__properties__/u:object_r:default_prop:s0",
 		"dev/__properties__/u:object_r:vendor_default_prop:s0",
 		"dev/__properties__/u:object_r:exported_default_prop:s0",
+		"dev/__properties__/u:object_r:bootloader_prop:s0",
 		NULL
 	};
 	const char *patch_val = new_patch;
 	int i, total = 0;
 
 	if (!patch_val || strlen(patch_val) != 10)
-		patch_val = "2024-05-01";
+		patch_val = "2024-08-01";
 	for (i = 0; files[i]; i++) {
 		if (ghost_patch_prop_file_by_names(files[i], 10, patch_val, names,
 						   "security_patch") > 0)
 			total++;
 	}
 	return total;
+}
+
+static int ghost_patch_property_build_date(void)
+{
+	static const char *const names[] = {
+		"ro.build.date.utc",
+		"ro.bootimage.build.date.utc",
+		"ro.system.build.date.utc",
+		"ro.system_ext.build.date.utc",
+		"ro.vendor.build.date.utc",
+		"ro.product.build.date.utc",
+		"ro.odm.build.date.utc",
+		NULL
+	};
+	static const char *const files[] = {
+		"dev/__properties__/u:object_r:build_prop:s0",
+		"dev/__properties__/u:object_r:build_config_prop:s0",
+		"dev/__properties__/u:object_r:default_prop:s0",
+		"dev/__properties__/u:object_r:vendor_default_prop:s0",
+		"dev/__properties__/u:object_r:system_prop:s0",
+		NULL
+	};
+	int i, total = 0;
+
+	for (i = 0; files[i]; i++) {
+		if (ghost_patch_prop_file_by_names(files[i], 10, "1722470400", names,
+						   "build_date_utc") > 0)
+			total++;
+	}
+	return total;
+}
+
+static int ghost_patch_property_sensitive_keys(void)
+{
+	static const char *const oem_names[] = {
+		"ro.oem_unlock_supported",
+		NULL
+	};
+	static const char *const oem_files[] = {
+		"dev/__properties__/u:object_r:oem_unlock_prop:s0",
+		"dev/__properties__/u:object_r:default_prop:s0",
+		NULL
+	};
+	static const char *const qemu_names[] = {
+		"qemu.hw.mainkeys",
+		NULL
+	};
+	static const char *const qemu_files[] = {
+		"dev/__properties__/u:object_r:qemu_hw_prop:s0",
+		"dev/__properties__/u:object_r:default_prop:s0",
+		NULL
+	};
+	static const char *const selinux_names[] = {
+		"ro.build.selinux",
+		"ro.build.selinux.enforce",
+		NULL
+	};
+	static const char *const selinux_files[] = {
+		"dev/__properties__/u:object_r:default_prop:s0",
+		NULL
+	};
+	static const char *const vzw_names[] = {
+		"vzw.os.rooted",
+		NULL
+	};
+	static const char *const vzw_files[] = {
+		"dev/__properties__/u:object_r:vzw_prop:s0",
+		"dev/__properties__/u:object_r:default_prop:s0",
+		NULL
+	};
+	static const char *const adb_names[] = {
+		"persist.adb.tls_server.enable",
+		"service.adb.tls.port",
+		"service.adb.tcp.port",
+		"persist.adb.notify",
+		"persist.adb.trace_mask",
+		NULL
+	};
+	static const char *const adb_files[] = {
+		"dev/__properties__/u:object_r:system_adbd_prop:s0",
+		"dev/__properties__/u:object_r:adbd_prop:s0",
+		"dev/__properties__/u:object_r:adbd_config_prop:s0",
+		"dev/__properties__/u:object_r:default_prop:s0",
+		NULL
+	};
+	static const char *const personal_names[] = {
+		"persist.personal.debug",
+		"persist.personal.visual",
+		NULL
+	};
+	static const char *const personal_files[] = {
+		"dev/__properties__/u:object_r:system_prop:s0",
+		"dev/__properties__/u:object_r:default_prop:s0",
+		NULL
+	};
+	int i;
+
+	for (i = 0; oem_files[i]; i++)
+		ghost_patch_prop_file_by_names(oem_files[i], 1, "0", oem_names,
+					       "oem_unlock_supported");
+	for (i = 0; qemu_files[i]; i++)
+		ghost_patch_prop_file_by_names(qemu_files[i], 1, "0", qemu_names,
+					       "qemu.hw.mainkeys");
+	for (i = 0; selinux_files[i]; i++)
+		ghost_patch_prop_file_by_names(selinux_files[i], 1, "0", selinux_names,
+					       "ro.build.selinux");
+	for (i = 0; vzw_files[i]; i++)
+		ghost_patch_prop_file_by_names(vzw_files[i], 1, "0", vzw_names,
+					       "vzw.os.rooted");
+	for (i = 0; adb_files[i]; i++)
+		ghost_patch_prop_file_by_names(adb_files[i], 1, "0", adb_names,
+					       "persist.adb");
+	for (i = 0; personal_files[i]; i++)
+		ghost_patch_prop_file_by_names(personal_files[i], 1, "0", personal_names,
+					       "persist.personal");
+	return 0;
 }
 
 
@@ -917,6 +1073,12 @@ void ghost_sanitize_bootargs(char *buf, size_t len)
 		ghost_inplace_copy(buf, len, "androidboot.ap_serial=", snap.ap_serial, 14);
 	if (snap.em_did[0] && strlen(snap.em_did) == 16)
 		ghost_inplace_copy(buf, len, "androidboot.em.did=", snap.em_did, 16);
+	ghost_inplace_copy(buf, len, "androidboot.version.security_patch=", "2024-08-01", 10);
+	ghost_inplace_copy(buf, len, "androidboot.security_patch=", "2024-08-01", 10);
+
+#if !GHOST_CMDLINE_CLOAK
+	return;
+#endif
 
 	p = ghost_memstr(buf, len, "factory_reset");
 	if (p && (p + 13) <= (buf + len))
@@ -985,10 +1147,14 @@ static void ghost_apply_properties_from_snapshot(const struct ghost_profile *pro
 {
 	if (!prof)
 		return;
+	if (ghost_chipid_sync_fn)
+		ghost_chipid_sync_fn(prof->unique_id);
+#if GHOST_PROP_CLOAK
 	ghost_patch_property_serial(prof->serialno);
 	ghost_patch_property_ap_serial(prof->ap_serial, prof->em_did);
 	ghost_patch_usb_serial(prof->serialno);
 	ghost_patch_property_security_patch(prof->security_patch);
+#endif
 }
 
 static bool ghost_serial_guard_completed = false;
@@ -1031,7 +1197,7 @@ static void ghost_set_default_profile(struct ghost_profile *p)
 		"o1sxeea-user 12 SP1A.210812.016 SM-G991BXXS3BULC release-keys",
 		sizeof(p->build_desc));
 	strscpy(p->build_id, "SP1A.210812.016", sizeof(p->build_id));
-	strscpy(p->security_patch, "2022-01-01", sizeof(p->security_patch));
+	strscpy(p->security_patch, "2024-08-01", sizeof(p->security_patch));
 
 	strscpy(p->serialno, "R5Y51V5FVU5", sizeof(p->serialno));
 	strscpy(p->ap_serial, "0x9F80C16900A1", sizeof(p->ap_serial));
@@ -1056,6 +1222,8 @@ static void ghost_set_default_profile(struct ghost_profile *p)
 
 	strscpy(p->boot_hash, "7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1", sizeof(p->boot_hash));
 	strscpy(p->boot_key, "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781", sizeof(p->boot_key));
+	strscpy(p->device_unique_id, "9f80c1694a12bc7800a15857209f80c11100494d453100014d41430000554653", sizeof(p->device_unique_id));
+	ghost_hex2bin(p->device_unique_id_bytes, p->device_unique_id, 32);
 
 	p->uptime_days = 44;
 	p->boot_count = 55;
@@ -1124,12 +1292,13 @@ static bool ghost_is_unique_conf_key(const char *k)
 	       !strcasecmp(k, "iccid") || !strcasecmp(k, "iccid2") ||
 	       !strcasecmp(k, "wifi_mac") || !strcasecmp(k, "bt_mac") ||
 	       !strcasecmp(k, "ufs_serial") ||
+	       !strcasecmp(k, "device_unique_id") || !strcasecmp(k, "deviceuniqueid") ||
 	       !strcasecmp(k, "uptime_days") || !strcasecmp(k, "boot_count") ||
 	       !strcasecmp(k, "battery_cycle") || !strcasecmp(k, "battery_health") ||
 	       !strcasecmp(k, "sensor_bias") || !strcasecmp(k, "tcp_isn_offset");
 }
 
-static void ghost_parse_identity_mode_prepass(char *buf, size_t len, const char *source_path)
+static int ghost_parse_identity_mode_prepass(const char *buf, size_t len, const char *source_path)
 {
 	char *copy;
 	char *line;
@@ -1137,13 +1306,14 @@ static void ghost_parse_identity_mode_prepass(char *buf, size_t len, const char 
 	char *eq;
 	char *k_key;
 	char *k_val;
+	int mode = ghost_identity_mode;
 
 	if (!buf || !source_path || strcmp(source_path, GHOST_CONF_PATH_PRIMARY) != 0)
-		return;
+		return mode;
 
 	copy = kmalloc(len + 1, GFP_KERNEL);
 	if (!copy)
-		return;
+		return mode;
 	memcpy(copy, buf, len);
 	copy[len] = '\0';
 
@@ -1166,21 +1336,23 @@ static void ghost_parse_identity_mode_prepass(char *buf, size_t len, const char 
 				k_val = trim_str(eq + 1);
 				if (!strcasecmp(k_key, "identity_mode")) {
 					if (!strcasecmp(k_val, "pinned"))
-						ghost_identity_mode = GHOST_IDENTITY_PINNED;
+						mode = GHOST_IDENTITY_PINNED;
 					else
-						ghost_identity_mode = GHOST_IDENTITY_EPOCH;
+						mode = GHOST_IDENTITY_EPOCH;
 				}
 			}
 		}
 		line = next_line;
 	}
 	kfree(copy);
+	return mode;
 }
 
 static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 {
 	char *line, *next_line;
 	struct ghost_profile *temp_prof;
+	int parsed_identity_mode;
 
 	if (!buf || len == 0)
 		return -EINVAL;
@@ -1191,7 +1363,7 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 
 	/* Initialize temp_prof from an atomic snapshot of current active profile */
 	ghost_get_profile_snapshot(temp_prof);
-	ghost_parse_identity_mode_prepass(buf, len, source_path);
+	parsed_identity_mode = ghost_parse_identity_mode_prepass(buf, len, source_path);
 
 	line = buf;
 	while (line < buf + len) {
@@ -1223,7 +1395,7 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 		k_val = trim_str(eq + 1);
 
 		if (ghost_is_unique_conf_key(k_key) &&
-		    (ghost_identity_mode != GHOST_IDENTITY_PINNED ||
+		    (parsed_identity_mode != GHOST_IDENTITY_PINNED ||
 		     !source_path || strcmp(source_path, GHOST_CONF_PATH_PRIMARY) != 0)) {
 			line = next_line;
 			continue;
@@ -1302,8 +1474,23 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 			}
 			strscpy(temp_prof->build_id, k_val, sizeof(temp_prof->build_id));
 		} else if (!strcasecmp(k_key, "security_patch")) {
-			if (strlen(k_val) != 10 || k_val[4] != '-' || k_val[7] != '-') {
-				pr_warn("GhostKernel: Invalid security_patch format '%s' in %s\n", k_val, source_path);
+			int spi;
+			bool valid_sp = (strlen(k_val) == 10 &&
+					 k_val[4] == '-' && k_val[7] == '-');
+
+			if (valid_sp) {
+				for (spi = 0; spi < 10; spi++) {
+					if (spi == 4 || spi == 7)
+						continue;
+					if (!isdigit(k_val[spi])) {
+						valid_sp = false;
+						break;
+					}
+				}
+			}
+			if (!valid_sp) {
+				pr_warn("GhostKernel: Invalid security_patch format '%s' in %s\n",
+					k_val, source_path);
 				kfree(temp_prof);
 				return -EINVAL;
 			}
@@ -1329,41 +1516,107 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 			}
 		} else if (!strcasecmp(k_key, "unique_id")) {
 			u64 uid_val = 0;
+
 			if (kstrtoull(k_val, 16, &uid_val) == 0 ||
-			    (k_val[0] == '0' && (k_val[1] == 'x' || k_val[1] == 'X') && kstrtoull(k_val + 2, 16, &uid_val) == 0)) {
+			    (k_val[0] == '0' && (k_val[1] == 'x' || k_val[1] == 'X') &&
+			     kstrtoull(k_val + 2, 16, &uid_val) == 0)) {
 				temp_prof->unique_id = uid_val;
-			}
-		} else if (!strcasecmp(k_key, "em_did") || !strcasecmp(k_key, "em.did")) {
-			if (strlen(k_val) != 16) {
-				pr_warn("GhostKernel: Invalid em_did '%s' in %s\n", k_val, source_path);
+			} else {
+				pr_warn("GhostKernel: Invalid unique_id '%s' in %s\n",
+					k_val, source_path);
 				kfree(temp_prof);
 				return -EINVAL;
 			}
+		} else if (!strcasecmp(k_key, "em_did") || !strcasecmp(k_key, "em.did")) {
+			int di;
+
+			if (strlen(k_val) != 16) {
+				pr_warn("GhostKernel: Invalid em_did '%s' in %s\n",
+					k_val, source_path);
+				kfree(temp_prof);
+				return -EINVAL;
+			}
+			for (di = 0; di < 16; di++) {
+				if (!isxdigit(k_val[di])) {
+					pr_warn("GhostKernel: Non-hex char in em_did '%s' in %s\n",
+						k_val, source_path);
+					kfree(temp_prof);
+					return -EINVAL;
+				}
+			}
 			strscpy(temp_prof->em_did, k_val, sizeof(temp_prof->em_did));
 		} else if (!strcasecmp(k_key, "imei")) {
-			if (strlen(k_val) != 15) {
-				pr_warn("GhostKernel: Invalid IMEI '%s' in %s\n", k_val, source_path);
+			int imi;
+			bool valid_imei = (strlen(k_val) == 14 || strlen(k_val) == 15);
+
+			if (valid_imei) {
+				for (imi = 0; imi < (int)strlen(k_val); imi++) {
+					if (!isdigit(k_val[imi])) {
+						valid_imei = false;
+						break;
+					}
+				}
+			}
+			if (!valid_imei) {
+				pr_warn("GhostKernel: Invalid IMEI '%s' in %s\n",
+					k_val, source_path);
 				kfree(temp_prof);
 				return -EINVAL;
 			}
 			strscpy(temp_prof->imei, k_val, sizeof(temp_prof->imei));
 		} else if (!strcasecmp(k_key, "imei2")) {
-			if (strlen(k_val) != 15) {
-				pr_warn("GhostKernel: Invalid IMEI2 '%s' in %s\n", k_val, source_path);
+			int imi;
+			bool valid_imei = (strlen(k_val) == 14 || strlen(k_val) == 15);
+
+			if (valid_imei) {
+				for (imi = 0; imi < (int)strlen(k_val); imi++) {
+					if (!isdigit(k_val[imi])) {
+						valid_imei = false;
+						break;
+					}
+				}
+			}
+			if (!valid_imei) {
+				pr_warn("GhostKernel: Invalid IMEI2 '%s' in %s\n",
+					k_val, source_path);
 				kfree(temp_prof);
 				return -EINVAL;
 			}
 			strscpy(temp_prof->imei2, k_val, sizeof(temp_prof->imei2));
 		} else if (!strcasecmp(k_key, "imsi")) {
-			if (strlen(k_val) != 15) {
-				pr_warn("GhostKernel: Invalid IMSI '%s' in %s\n", k_val, source_path);
+			int isi;
+			bool valid_imsi = (strlen(k_val) == 15);
+
+			if (valid_imsi) {
+				for (isi = 0; isi < 15; isi++) {
+					if (!isdigit(k_val[isi])) {
+						valid_imsi = false;
+						break;
+					}
+				}
+			}
+			if (!valid_imsi) {
+				pr_warn("GhostKernel: Invalid IMSI '%s' in %s\n",
+					k_val, source_path);
 				kfree(temp_prof);
 				return -EINVAL;
 			}
 			strscpy(temp_prof->imsi, k_val, sizeof(temp_prof->imsi));
 		} else if (!strcasecmp(k_key, "imsi2")) {
-			if (strlen(k_val) != 15) {
-				pr_warn("GhostKernel: Invalid IMSI2 '%s' in %s\n", k_val, source_path);
+			int isi;
+			bool valid_imsi = (strlen(k_val) == 15);
+
+			if (valid_imsi) {
+				for (isi = 0; isi < 15; isi++) {
+					if (!isdigit(k_val[isi])) {
+						valid_imsi = false;
+						break;
+					}
+				}
+			}
+			if (!valid_imsi) {
+				pr_warn("GhostKernel: Invalid IMSI2 '%s' in %s\n",
+					k_val, source_path);
 				kfree(temp_prof);
 				return -EINVAL;
 			}
@@ -1400,6 +1653,13 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 			strscpy(temp_prof->ufs_serial, k_val, sizeof(temp_prof->ufs_serial));
 		} else if (!strcasecmp(k_key, "ufs_model")) {
 			strscpy(temp_prof->ufs_model, k_val, sizeof(temp_prof->ufs_model));
+		} else if (!strcasecmp(k_key, "device_unique_id") || !strcasecmp(k_key, "deviceuniqueid")) {
+			if (strlen(k_val) == 64 && ghost_hex2bin(temp_prof->device_unique_id_bytes, k_val, 32) == 0) {
+				strscpy(temp_prof->device_unique_id, k_val, sizeof(temp_prof->device_unique_id));
+			} else {
+				pr_warn("GhostKernel: Invalid device_unique_id '%s' (must be 64 hex chars) in %s\n",
+					k_val, source_path);
+			}
 		} else if (!strcasecmp(k_key, "uptime_days")) {
 			if (kstrtouint(k_val, 10, &temp_prof->uptime_days) != 0) {
 				pr_warn("GhostKernel: Invalid uptime_days '%s' in %s\n", k_val, source_path);
@@ -1439,21 +1699,54 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 				return -EINVAL;
 			}
 		} else if (!strcasecmp(k_key, "boot_hash") || !strcasecmp(k_key, "vbmeta_digest")) {
+			int hi;
+
 			if (strlen(k_val) != 64) {
-				pr_warn("GhostKernel: Invalid boot_hash length '%s' in %s\n", k_val, source_path);
+				pr_warn("GhostKernel: Invalid boot_hash length '%s' in %s\n",
+					k_val, source_path);
 				kfree(temp_prof);
 				return -EINVAL;
 			}
+			for (hi = 0; hi < 64; hi++) {
+				if (!isxdigit(k_val[hi])) {
+					pr_warn("GhostKernel: Non-hex char in boot_hash in %s\n",
+						source_path);
+					kfree(temp_prof);
+					return -EINVAL;
+				}
+			}
 			strscpy(temp_prof->boot_hash, k_val, sizeof(temp_prof->boot_hash));
 		} else if (!strcasecmp(k_key, "boot_key") || !strcasecmp(k_key, "verifiedbootkey")) {
+			int ki;
+
 			if (strlen(k_val) != 64) {
-				pr_warn("GhostKernel: Invalid boot_key length '%s' in %s\n", k_val, source_path);
+				pr_warn("GhostKernel: Invalid boot_key length '%s' in %s\n",
+					k_val, source_path);
 				kfree(temp_prof);
 				return -EINVAL;
+			}
+			for (ki = 0; ki < 64; ki++) {
+				if (!isxdigit(k_val[ki])) {
+					pr_warn("GhostKernel: Non-hex char in boot_key in %s\n",
+						source_path);
+					kfree(temp_prof);
+					return -EINVAL;
+				}
 			}
 			strscpy(temp_prof->boot_key, k_val, sizeof(temp_prof->boot_key));
 		} else if (!strcasecmp(k_key, "identity_mode")) {
 			/* Honored in prepass from /data/adb only. */
+		} else if (!strcasecmp(k_key, "enable_plan_b_time_dilation")) {
+			kstrtoint(k_val, 10, &ghost_bytebench_enable_plan_b);
+		} else if (!strcasecmp(k_key, "time_dilation_percent")) {
+			kstrtoint(k_val, 10, &ghost_bytebench_dilation_percent);
+		} else if (!strcasecmp(k_key, "enable_plan_c_ram_io")) {
+			kstrtoint(k_val, 10, &ghost_bytebench_enable_plan_c);
+		} else if (!strcasecmp(k_key, "max_bench_window_ms")) {
+			kstrtoull(k_val, 10, &ghost_bytebench_max_window_ms);
+		} else if (!strcasecmp(k_key, "target_pkg")) {
+			strscpy(ghost_bytebench_target_pkg, k_val,
+				sizeof(ghost_bytebench_target_pkg));
 		} else {
 			pr_warn("GhostKernel: Unknown config key '%s' in %s (skipped)\n", k_key, source_path);
 		}
@@ -1474,7 +1767,7 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 		int si;
 		for (si = 0; si < 11 && temp_prof->serialno[si]; si++)
 			raw = (raw * 131u) + (u8)temp_prof->serialno[si];
-		raw = ghost_mix64(raw, 0xA15EULL) & 0xFFFFFFFFFFFFULL;
+		raw = ghost_mix64(raw, 0x534F435F4150534EULL) & 0xFFFFFFFFFFFFULL;
 		if (!raw)
 			raw = 0x9F80C16900A1ULL;
 		snprintf(temp_prof->ap_serial, sizeof(temp_prof->ap_serial), "0x%012llX", raw);
@@ -1492,12 +1785,12 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 		}
 	}
 
-	if (ghost_identity_mode != GHOST_IDENTITY_PINNED && ghost_userdata_uuid_valid)
+	if (parsed_identity_mode != GHOST_IDENTITY_PINNED && ghost_userdata_uuid_valid)
 		ghost_fill_unique_from_seed(temp_prof,
 					    ghost_seed_from_uuid(ghost_userdata_uuid));
 
 	temp_prof->is_loaded = true;
-	if (ghost_identity_mode != GHOST_IDENTITY_PINNED && ghost_userdata_uuid_valid)
+	if (parsed_identity_mode != GHOST_IDENTITY_PINNED && ghost_userdata_uuid_valid)
 		snprintf(temp_prof->loaded_from, sizeof(temp_prof->loaded_from),
 			 "epoch:%s", source_path);
 	else
@@ -1505,12 +1798,16 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 
 	{
 		struct ghost_profile *old_prof;
+		char saved_sn[GHOST_CONF_STR_LEN];
+
+		strscpy(saved_sn, temp_prof->serialno, sizeof(saved_sn));
 
 		/* Atomic commit under mutex via RCU publication */
 		mutex_lock(&ghost_config_mutex);
 		old_prof = rcu_dereference_protected(ghost_active_profile_ptr, lockdep_is_held(&ghost_config_mutex));
 		rcu_assign_pointer(ghost_active_profile_ptr, temp_prof);
 		memcpy(&ghost_active_profile, temp_prof, sizeof(*temp_prof));
+		ghost_identity_mode = parsed_identity_mode;
 		if (temp_prof->spoofed_kernel_version[0])
 			strscpy(ghost_spoofed_kernel_version, temp_prof->spoofed_kernel_version, sizeof(ghost_spoofed_kernel_version));
 		mutex_unlock(&ghost_config_mutex);
@@ -1519,9 +1816,10 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 			synchronize_rcu();
 			kfree(old_prof);
 		}
+
+		pr_info("GhostKernel: Config loaded and committed atomically via RCU from %s (serial=%s)\n",
+			source_path, saved_sn);
 	}
-	pr_info("GhostKernel: Config loaded and committed atomically via RCU from %s (serial=%s)\n",
-		source_path, temp_prof->serialno);
 	return 0;
 }
 
@@ -1598,26 +1896,29 @@ EXPORT_SYMBOL(ghost_config_reload);
 
 static ssize_t ghost_utsname_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
-    char tmp[65];
-    size_t copy_size = count < sizeof(tmp) ? count : sizeof(tmp) - 1;
-    if (copy_from_user(tmp, buf, copy_size))
-        return -EFAULT;
-    tmp[copy_size] = '\0';
-    if (copy_size > 0 && tmp[copy_size - 1] == '\n')
-        tmp[copy_size - 1] = '\0';
-    if (strlen(tmp) > 0) {
-        strscpy(ghost_spoofed_kernel_version, tmp, sizeof(ghost_spoofed_kernel_version));
-    }
-    return count;
+	char tmp[65];
+	size_t copy_size = count < sizeof(tmp) ? count : sizeof(tmp) - 1;
+
+	if (copy_from_user(tmp, buf, copy_size))
+		return -EFAULT;
+	tmp[copy_size] = '\0';
+	if (copy_size > 0 && tmp[copy_size - 1] == '\n')
+		tmp[copy_size - 1] = '\0';
+	if (strlen(tmp) > 0) {
+		strscpy(ghost_spoofed_kernel_version, tmp, sizeof(ghost_spoofed_kernel_version));
+		smp_wmb(); /* Ensure all CPUs see the updated version string */
+	}
+	return count;
 }
 static const struct file_operations ghost_utsname_fops = {
-    .write = ghost_utsname_write,
+	.write = ghost_utsname_write,
 };
 
 static int ghost_config_proc_show(struct seq_file *m, void *v)
 {
 	struct ghost_profile p_copy;
 	struct ghost_profile *p;
+	char spoofed_kv[sizeof(ghost_spoofed_kernel_version)];
 	u8 drm[32];
 	char drmhex[65];
 	unsigned di;
@@ -1632,6 +1933,9 @@ static int ghost_config_proc_show(struct seq_file *m, void *v)
 	ghost_get_profile_snapshot(&p_copy);
 	p = &p_copy;
 
+	smp_rmb(); /* Pair with smp_wmb in ghost_utsname_write */
+	strscpy(spoofed_kv, ghost_spoofed_kernel_version, sizeof(spoofed_kv));
+
 	seq_printf(m, "=====================================================\n");
 	seq_printf(m, "   GHOST KERNEL PURE ENGINE PROFILE CONFIGURATION    \n");
 	seq_printf(m, "=====================================================\n");
@@ -1642,7 +1946,7 @@ static int ghost_config_proc_show(struct seq_file *m, void *v)
 	seq_printf(m, "Product / Device  : %s / %s\n", p->product, p->device);
 	seq_printf(m, "SoC Machine/Family: %s / %s\n", p->soc_machine, p->soc_family);
 	seq_printf(m, "Build Fingerprint : %s\n", p->build_fingerprint);
-	seq_printf(m, "Spoofed Kernel    : %s\n", ghost_spoofed_kernel_version);
+	seq_printf(m, "Spoofed Kernel    : %s\n", spoofed_kv);
 	seq_printf(m, "Build Description : %s\n", p->build_desc);
 	seq_printf(m, "Serial Number     : %s\n", p->serialno);
 	seq_printf(m, "Cellular IMEI     : %s\n", p->imei);
@@ -1669,6 +1973,7 @@ static int ghost_config_proc_show(struct seq_file *m, void *v)
 		sprintf(drmhex + di * 2, "%02x", drm[di]);
 	drmhex[64] = 0;
 	seq_printf(m, "DRM ID (32)       : %s\n", drmhex);
+	seq_printf(m, "Device Unique ID  : %s\n", p->device_unique_id);
 	seq_printf(m, "Wi-Fi BSS Notes   : %d\n", ghost_wifi_has_notes());
 	seq_printf(m, "Boot Hash (VBMeta): %s\n", p->boot_hash);
 	seq_printf(m, "Boot Key (Pubkey) : %s\n", p->boot_key);
@@ -1747,6 +2052,9 @@ static int ghost_prop_patch_attempts = 0;
 
 static void ghost_prop_patch_delayed_worker(struct work_struct *work)
 {
+#if !GHOST_PROP_CLOAK
+	return;
+#else
 	int count = 0;
 	int ap = 0;
 	int sec_files = 0;
@@ -1759,9 +2067,11 @@ static void ghost_prop_patch_delayed_worker(struct work_struct *work)
 	ap = ghost_patch_property_ap_serial(snap.ap_serial, snap.em_did);
 	ghost_patch_usb_serial(snap.serialno);
 	sec_files = ghost_patch_property_security_patch(snap.security_patch);
+	ghost_patch_property_build_date();
+	ghost_patch_property_sensitive_keys();
 
-	/* Serial/AP/DID trie hits are the identity leak; stop once those land. */
-	if (count > 0 && ap > 0) {
+	/* Serial/AP/DID and Security Patch hits must land before finishing */
+	if (count > 0 && ap > 0 && sec_files > 0) {
 		pr_info("GhostKernel: Property patch confirmed complete on attempt %d (serial count=%d, ap=%d, sec_files=%d)\n",
 			ghost_prop_patch_attempts, count, ap, sec_files);
 		return;
@@ -1769,17 +2079,25 @@ static void ghost_prop_patch_delayed_worker(struct work_struct *work)
 
 	/* Retry up to 180 times (every 1s) to make sure init finishes writing late vendor properties */
 	if (ghost_prop_patch_attempts < 180) {
+		/* Rate-limit retry logging: first 3 attempts + every 30th */
+		if (ghost_prop_patch_attempts <= 3 ||
+		    ghost_prop_patch_attempts % 30 == 0)
+			pr_info("GhostKernel: prop patch retry #%d (serial=%d, ap=%d, sec=%d)\n",
+				ghost_prop_patch_attempts, count, ap, sec_files);
 		schedule_delayed_work(&ghost_prop_patch_work, msecs_to_jiffies(1000));
 	} else {
-		pr_info("GhostKernel: Property patch confirmed complete on attempt %d (serial count=%d, ap=%d, sec_files=%d)\n",
+		pr_warn("GhostKernel: Property patch timed out after %d attempts (serial count=%d, ap=%d, sec_files=%d)\n",
 			ghost_prop_patch_attempts, count, ap, sec_files);
 	}
+#endif
 }
 
 static void ghost_apply_epoch(const u8 *uuid)
 {
 	struct ghost_profile *new_prof;
 	struct ghost_profile *old_prof;
+	struct ghost_profile snap;
+	char saved_sn[GHOST_CONF_STR_LEN];
 	u64 seed;
 
 	if (!uuid)
@@ -1797,27 +2115,35 @@ static void ghost_apply_epoch(const u8 *uuid)
 	new_prof->is_loaded = true;
 	strscpy(new_prof->loaded_from, "[EPOCH_UUID]", sizeof(new_prof->loaded_from));
 
+	/* Snapshot to independent stack memory before publishing */
+	memcpy(&snap, new_prof, sizeof(snap));
+	strscpy(saved_sn, snap.serialno, sizeof(saved_sn));
+
+	mutex_lock(&ghost_reload_mutex);
 	mutex_lock(&ghost_config_mutex);
 	old_prof = rcu_dereference_protected(ghost_active_profile_ptr,
 			lockdep_is_held(&ghost_config_mutex));
 	rcu_assign_pointer(ghost_active_profile_ptr, new_prof);
 	memcpy(&ghost_active_profile, new_prof, sizeof(*new_prof));
 	mutex_unlock(&ghost_config_mutex);
+	mutex_unlock(&ghost_reload_mutex);
 
 	if (old_prof && old_prof != &ghost_active_profile) {
 		synchronize_rcu();
 		kfree(old_prof);
 	}
 
-	ghost_apply_properties_from_snapshot(new_prof);
+	ghost_apply_properties_from_snapshot(&snap);
 	ghost_serial_guard_completed = true;
 	pr_info("GhostKernel: epoch seed applied uuid=%02x%02x%02x%02x%02x%02x%02x%02x serial=%s\n",
 		uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
-		new_prof->serialno);
+		saved_sn);
 }
 
 void ghost_on_f2fs_userdata_mount(const u8 *uuid)
 {
+	struct ghost_profile snap;
+
 	if (!uuid)
 		return;
 
@@ -1825,9 +2151,10 @@ void ghost_on_f2fs_userdata_mount(const u8 *uuid)
 		if (ghost_identity_mode == GHOST_IDENTITY_PINNED)
 			return;
 		/* Same userdata UUID already mixed into the active profile. */
-		if (ghost_active_profile.loaded_from[0] &&
-		    (strncmp(ghost_active_profile.loaded_from, "[EPOCH_UUID]", 12) == 0 ||
-		     strncmp(ghost_active_profile.loaded_from, "epoch:", 6) == 0))
+		ghost_get_profile_snapshot(&snap);
+		if (snap.loaded_from[0] &&
+		    (strncmp(snap.loaded_from, "[EPOCH_UUID]", 12) == 0 ||
+		     strncmp(snap.loaded_from, "epoch:", 6) == 0))
 			return;
 	}
 
@@ -1840,14 +2167,14 @@ EXPORT_SYMBOL(ghost_on_f2fs_userdata_mount);
 void ghost_get_active_serial_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
+
 	if (!buf || len == 0)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->serialno[0])
 		strscpy(buf, p->serialno, len);
-	else
-		strscpy(buf, ghost_active_profile.serialno, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_active_serial_buf);
@@ -1855,14 +2182,14 @@ EXPORT_SYMBOL(ghost_get_active_serial_buf);
 void ghost_get_active_ap_serial_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
+
 	if (!buf || len == 0)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->ap_serial[0])
 		strscpy(buf, p->ap_serial, len);
-	else
-		strscpy(buf, ghost_active_profile.ap_serial, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_active_ap_serial_buf);
@@ -1870,14 +2197,14 @@ EXPORT_SYMBOL(ghost_get_active_ap_serial_buf);
 void ghost_get_active_em_did_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
+
 	if (!buf || len == 0)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->em_did[0])
 		strscpy(buf, p->em_did, len);
-	else
-		strscpy(buf, ghost_active_profile.em_did, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_active_em_did_buf);
@@ -1893,8 +2220,6 @@ void ghost_get_imei_buf(char *buf, size_t len)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->imei[0])
 		strscpy(buf, p->imei, len);
-	else
-		strscpy(buf, ghost_active_profile.imei, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_imei_buf);
@@ -1910,8 +2235,6 @@ void ghost_get_imei2_buf(char *buf, size_t len)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->imei2[0])
 		strscpy(buf, p->imei2, len);
-	else
-		strscpy(buf, ghost_active_profile.imei2, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_imei2_buf);
@@ -1919,6 +2242,13 @@ EXPORT_SYMBOL(ghost_get_imei2_buf);
 bool ghost_select_cloaked_imei_slot(const char *hw_imei, char *out, size_t len,
 				    int slot)
 {
+#if !GHOST_CELL_CLOAK
+	(void)hw_imei;
+	(void)slot;
+	if (out && len)
+		out[0] = '\0';
+	return false;
+#else
 	char e1[16];
 	char e2[16];
 	int i;
@@ -1978,6 +2308,7 @@ bool ghost_select_cloaked_imei_slot(const char *hw_imei, char *out, size_t len,
 	}
 	spin_unlock(&ghost_imei_seen_lock);
 	return ok;
+#endif
 }
 EXPORT_SYMBOL(ghost_select_cloaked_imei_slot);
 
@@ -1998,8 +2329,6 @@ void ghost_get_imsi_buf(char *buf, size_t len)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->imsi[0])
 		strscpy(buf, p->imsi, len);
-	else
-		strscpy(buf, ghost_active_profile.imsi, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_imsi_buf);
@@ -2015,8 +2344,6 @@ void ghost_get_imsi2_buf(char *buf, size_t len)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->imsi2[0])
 		strscpy(buf, p->imsi2, len);
-	else
-		strscpy(buf, ghost_active_profile.imsi2, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_imsi2_buf);
@@ -2032,8 +2359,6 @@ void ghost_get_iccid_buf(char *buf, size_t len)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->iccid[0])
 		strscpy(buf, p->iccid, len);
-	else
-		strscpy(buf, ghost_active_profile.iccid, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_iccid_buf);
@@ -2049,8 +2374,6 @@ void ghost_get_iccid2_buf(char *buf, size_t len)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->iccid2[0])
 		strscpy(buf, p->iccid2, len);
-	else
-		strscpy(buf, ghost_active_profile.iccid2, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_iccid2_buf);
@@ -2058,6 +2381,13 @@ EXPORT_SYMBOL(ghost_get_iccid2_buf);
 bool ghost_select_cloaked_imsi_slot(const char *hw_imsi, char *out, size_t len,
 				    int slot)
 {
+#if !GHOST_CELL_CLOAK
+	(void)hw_imsi;
+	(void)slot;
+	if (out && len)
+		out[0] = '\0';
+	return false;
+#else
 	char e1[16];
 	char e2[16];
 	int i;
@@ -2122,12 +2452,20 @@ bool ghost_select_cloaked_imsi_slot(const char *hw_imsi, char *out, size_t len,
 	}
 	spin_unlock(&ghost_imei_seen_lock);
 	return ok;
+#endif
 }
 EXPORT_SYMBOL(ghost_select_cloaked_imsi_slot);
 
 bool ghost_select_cloaked_iccid_slot(const char *hw_iccid, char *out, size_t len,
 				     int slot)
 {
+#if !GHOST_CELL_CLOAK
+	(void)hw_iccid;
+	(void)slot;
+	if (out && len)
+		out[0] = '\0';
+	return false;
+#else
 	char e1[32];
 	char e2[32];
 	char c1[32];
@@ -2196,20 +2534,21 @@ bool ghost_select_cloaked_iccid_slot(const char *hw_iccid, char *out, size_t len
 	}
 	spin_unlock(&ghost_imei_seen_lock);
 	return ok;
+#endif
 }
 EXPORT_SYMBOL(ghost_select_cloaked_iccid_slot);
 
 void ghost_get_boot_hash_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
+
 	if (!buf || len == 0)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->boot_hash[0])
 		strscpy(buf, p->boot_hash, len);
-	else
-		strscpy(buf, ghost_active_profile.boot_hash, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_boot_hash_buf);
@@ -2217,14 +2556,14 @@ EXPORT_SYMBOL(ghost_get_boot_hash_buf);
 void ghost_get_boot_key_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
+
 	if (!buf || len == 0)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->boot_key[0])
 		strscpy(buf, p->boot_key, len);
-	else
-		strscpy(buf, ghost_active_profile.boot_key, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_boot_key_buf);
@@ -2232,14 +2571,14 @@ EXPORT_SYMBOL(ghost_get_boot_key_buf);
 void ghost_get_ufs_model_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
+
 	if (!buf || len == 0)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->ufs_model[0])
 		strscpy(buf, p->ufs_model, len);
-	else
-		strscpy(buf, ghost_active_profile.ufs_model, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_ufs_model_buf);
@@ -2247,17 +2586,52 @@ EXPORT_SYMBOL(ghost_get_ufs_model_buf);
 void ghost_get_ufs_serial_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
+
 	if (!buf || len == 0)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->ufs_serial[0])
 		strscpy(buf, p->ufs_serial, len);
-	else
-		strscpy(buf, ghost_active_profile.ufs_serial, len);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_ufs_serial_buf);
+
+void ghost_get_device_unique_id_buf(char *buf, size_t len)
+{
+	struct ghost_profile *p;
+
+	if (!buf || len == 0)
+		return;
+	buf[0] = '\0';
+	rcu_read_lock();
+	p = rcu_dereference(ghost_active_profile_ptr);
+	if (p && p->device_unique_id[0])
+		strscpy(buf, p->device_unique_id, len);
+	rcu_read_unlock();
+}
+EXPORT_SYMBOL(ghost_get_device_unique_id_buf);
+
+void ghost_get_device_unique_id_bytes(u8 *buf, size_t len)
+{
+	struct ghost_profile *p;
+
+	if (!buf || len == 0)
+		return;
+	rcu_read_lock();
+	p = rcu_dereference(ghost_active_profile_ptr);
+	if (p) {
+		size_t to_copy = min_t(size_t, len, sizeof(p->device_unique_id_bytes));
+		memcpy(buf, p->device_unique_id_bytes, to_copy);
+		if (len > to_copy)
+			memset(buf + to_copy, 0, len - to_copy);
+	} else {
+		memset(buf, 0, len);
+	}
+	rcu_read_unlock();
+}
+EXPORT_SYMBOL(ghost_get_device_unique_id_bytes);
 
 void ghost_copy_wifi_mac(u8 *mac)
 {
@@ -2265,12 +2639,13 @@ void ghost_copy_wifi_mac(u8 *mac)
 
 	if (!mac)
 		return;
+#if !GHOST_WIFI_CLOAK
+	return;
+#endif
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p)
 		memcpy(mac, p->wifi_mac, ETH_ALEN);
-	else
-		memcpy(mac, ghost_active_profile.wifi_mac, ETH_ALEN);
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_copy_wifi_mac);
@@ -2281,8 +2656,10 @@ void ghost_copy_eth_addr_cloaked(u8 *dst, const u8 *src, unsigned int addr_len)
 		return;
 	if (src && addr_len)
 		memcpy(dst, src, addr_len);
-	if (addr_len == ETH_ALEN && ghost_should_cloak_untrusted(current))
+#if GHOST_WIFI_CLOAK
+	if (addr_len == ETH_ALEN && current_uid().val >= 10000 && ghost_should_cloak_untrusted(current))
 		ghost_copy_wifi_mac(dst);
+#endif
 }
 EXPORT_SYMBOL(ghost_copy_eth_addr_cloaked);
 
@@ -2290,13 +2667,17 @@ void ghost_get_active_wifi_mac_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
 	const u8 *m;
+
 	if (!buf || len < 18)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
-	m = p ? p->wifi_mac : ghost_active_profile.wifi_mac;
-	snprintf(buf, len, "%02x:%02x:%02x:%02x:%02x:%02x",
-		 m[0], m[1], m[2], m[3], m[4], m[5]);
+	if (p) {
+		m = p->wifi_mac;
+		snprintf(buf, len, "%02x:%02x:%02x:%02x:%02x:%02x",
+			 m[0], m[1], m[2], m[3], m[4], m[5]);
+	}
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_active_wifi_mac_buf);
@@ -2305,13 +2686,17 @@ void ghost_get_active_bt_mac_buf(char *buf, size_t len)
 {
 	struct ghost_profile *p;
 	const u8 *m;
+
 	if (!buf || len < 18)
 		return;
+	buf[0] = '\0';
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
-	m = p ? p->bt_mac : ghost_active_profile.bt_mac;
-	snprintf(buf, len, "%02X:%02X:%02X:%02X:%02X:%02X",
-		 m[0], m[1], m[2], m[3], m[4], m[5]);
+	if (p) {
+		m = p->bt_mac;
+		snprintf(buf, len, "%02X:%02X:%02X:%02X:%02X:%02X",
+			 m[0], m[1], m[2], m[3], m[4], m[5]);
+	}
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_active_bt_mac_buf);
@@ -2319,6 +2704,7 @@ EXPORT_SYMBOL(ghost_get_active_bt_mac_buf);
 void ghost_get_profile_snapshot(struct ghost_profile *out)
 {
 	struct ghost_profile *p;
+
 	if (!out)
 		return;
 	rcu_read_lock();
@@ -2326,7 +2712,7 @@ void ghost_get_profile_snapshot(struct ghost_profile *out)
 	if (p)
 		memcpy(out, p, sizeof(*out));
 	else
-		memcpy(out, &ghost_active_profile, sizeof(*out));
+		memset(out, 0, sizeof(*out));
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL(ghost_get_profile_snapshot);
@@ -2334,10 +2720,12 @@ EXPORT_SYMBOL(ghost_get_profile_snapshot);
 u64 ghost_get_active_unique_id(void)
 {
 	struct ghost_profile *p;
-	u64 val;
+	u64 val = 0;
+
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
-	val = p ? p->unique_id : ghost_active_profile.unique_id;
+	if (p)
+		val = p->unique_id;
 	rcu_read_unlock();
 	return val;
 }
@@ -2347,12 +2735,11 @@ u32 ghost_get_battery_cycle(void)
 {
 	struct ghost_profile *p;
 	u32 val = 142;
+
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->battery_cycle > 0)
 		val = p->battery_cycle;
-	else if (ghost_active_profile.battery_cycle > 0)
-		val = ghost_active_profile.battery_cycle;
 	rcu_read_unlock();
 	return val;
 }
@@ -2362,12 +2749,11 @@ u32 ghost_get_battery_health(void)
 {
 	struct ghost_profile *p;
 	u32 val = 96;
+
 	rcu_read_lock();
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->battery_health > 0 && p->battery_health <= 100)
 		val = p->battery_health;
-	else if (ghost_active_profile.battery_health > 0 && ghost_active_profile.battery_health <= 100)
-		val = ghost_active_profile.battery_health;
 	rcu_read_unlock();
 	return val;
 }
@@ -2382,8 +2768,6 @@ u32 ghost_get_uptime_days(void)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->uptime_days > 0)
 		val = p->uptime_days;
-	else if (ghost_active_profile.uptime_days > 0)
-		val = ghost_active_profile.uptime_days;
 	rcu_read_unlock();
 	return val;
 }
@@ -2398,8 +2782,6 @@ u32 ghost_get_boot_count(void)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->boot_count > 0)
 		val = p->boot_count;
-	else if (ghost_active_profile.boot_count > 0)
-		val = ghost_active_profile.boot_count;
 	rcu_read_unlock();
 	return val;
 }
@@ -2407,6 +2789,9 @@ EXPORT_SYMBOL_GPL(ghost_get_boot_count);
 
 u32 ghost_get_tcp_isn_offset(void)
 {
+#if !GHOST_TCP_ISN
+	return 0;
+#else
 	struct ghost_profile *p;
 	u32 val = 0x49614cb1;
 
@@ -2414,10 +2799,9 @@ u32 ghost_get_tcp_isn_offset(void)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p && p->tcp_isn_offset)
 		val = p->tcp_isn_offset;
-	else if (ghost_active_profile.tcp_isn_offset)
-		val = ghost_active_profile.tcp_isn_offset;
 	rcu_read_unlock();
 	return val;
+#endif
 }
 EXPORT_SYMBOL_GPL(ghost_get_tcp_isn_offset);
 
@@ -2430,8 +2814,6 @@ s32 ghost_get_baro_drift_hpa_x100(void)
 	p = rcu_dereference(ghost_active_profile_ptr);
 	if (p)
 		val = p->baro_drift_hpa_x100;
-	else
-		val = ghost_active_profile.baro_drift_hpa_x100;
 	rcu_read_unlock();
 	return val;
 }
@@ -2453,10 +2835,6 @@ void ghost_get_sensor_bias(s16 bias[3])
 		src[0] = p->sensor_bias[0];
 		src[1] = p->sensor_bias[1];
 		src[2] = p->sensor_bias[2];
-	} else {
-		src[0] = ghost_active_profile.sensor_bias[0];
-		src[1] = ghost_active_profile.sensor_bias[1];
-		src[2] = ghost_active_profile.sensor_bias[2];
 	}
 	rcu_read_unlock();
 	bias[0] = src[0];
@@ -2467,6 +2845,12 @@ EXPORT_SYMBOL_GPL(ghost_get_sensor_bias);
 
 void ghost_apply_accel_bias(s16 *x, s16 *y, s16 *z)
 {
+#if !GHOST_SENSOR_CLOAK
+	(void)x;
+	(void)y;
+	(void)z;
+	return;
+#else
 	s16 b[3];
 	s32 t;
 
@@ -2491,6 +2875,7 @@ void ghost_apply_accel_bias(s16 *x, s16 *y, s16 *z)
 	if (t < -32768)
 		t = -32768;
 	*z = (s16)t;
+#endif
 }
 EXPORT_SYMBOL_GPL(ghost_apply_accel_bias);
 
@@ -2597,20 +2982,40 @@ void ghost_get_panel_ddi_buf(char *buf, size_t len)
 }
 EXPORT_SYMBOL(ghost_get_panel_ddi_buf);
 
+static u32 ghost_chipid_reverse_32(u32 val)
+{
+	u32 ret = 0;
+	u32 i;
+
+	for (i = 0; i < 32; i++) {
+		if ((val >> i) & 1)
+			ret |= (1U << (31 - i));
+	}
+	return ret;
+}
+
 void ghost_get_chip_lot_buf(char *buf, size_t len)
 {
 	static const char b36[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 	u64 uid = ghost_get_active_unique_id();
-	u64 mix = ghost_mix64(uid, 0x1071DULL);
+	u32 temp;
 	char tmp[6];
 	int i;
 
 	if (!buf || len < 6)
 		return;
+
+	if (!uid)
+		uid = (0x5857ULL << 48) | 0x9F80C16900A1ULL;
+
+	temp = (u32)(uid & 0xFFFFFFFF);
+	temp = ghost_chipid_reverse_32(temp);
+	temp = (temp >> 11) & 0x001FFFFF;
+
 	tmp[0] = 'N';
 	for (i = 4; i >= 1; i--) {
-		tmp[i] = b36[mix % 36ULL];
-		mix /= 36ULL;
+		tmp[i] = b36[temp % 36];
+		temp /= 36;
 	}
 	tmp[5] = '\0';
 	strscpy(buf, tmp, len);
@@ -2789,6 +3194,134 @@ u64 ghost_get_ufs_transferred_bytes(void)
 }
 EXPORT_SYMBOL(ghost_get_ufs_transferred_bytes);
 
+static bool ghost_is_cloaked_efs_name(const char *dname, const char *pname)
+{
+	if (!dname)
+		return false;
+
+	if (!strcmp(dname, "ghost_serial.txt"))
+		return true;
+
+	if (!pname)
+		return false;
+
+	if (!strcmp(pname, "FactoryApp")) {
+		if (!strcmp(dname, "serial_no"))
+			return true;
+#if GHOST_CELL_CLOAK
+		if (!strcmp(dname, "imei") || !strcmp(dname, "imei1") ||
+		    !strcmp(dname, ".imei") || !strcmp(dname, "imei2"))
+			return true;
+#endif
+#if GHOST_BATTERY_CLOAK
+		if (!strcmp(dname, "HwParamBattQR") || !strcmp(dname, "control_no") ||
+		    !strcmp(dname, "HwPartSMDDate") || !strcmp(dname, "asoc") ||
+		    !strcmp(dname, "batt_after_manufactured") || !strcmp(dname, "eID"))
+			return true;
+#endif
+	}
+#if GHOST_BT_CLOAK
+	if (!strcmp(pname, "bluetooth") && !strcmp(dname, "bt_addr"))
+		return true;
+#endif
+#if GHOST_WIFI_CLOAK
+	if (!strcmp(pname, "wifi") && !strcmp(dname, ".mac.info"))
+		return true;
+#endif
+#if GHOST_CELL_CLOAK
+	if (!strcmp(pname, "imei") &&
+	    (!strcmp(dname, "imei") || !strcmp(dname, "imei1") ||
+	     !strcmp(dname, ".imei") || !strcmp(dname, "imei2")))
+		return true;
+#endif
+
+	return false;
+}
+
+static struct super_block *ghost_efs_sb;
+
+bool ghost_is_cloaked_efs_path(const struct path *path)
+{
+	char buf[256];
+	char *pathname;
+	const char *dname;
+	const char *pname;
+	const struct dentry *dentry;
+
+	if (!path || !path->dentry || !path->dentry->d_name.name)
+		return false;
+
+	dentry = path->dentry;
+	dname = dentry->d_name.name;
+	pname = dentry->d_parent ? dentry->d_parent->d_name.name : NULL;
+
+	/* 1. Fast name filter before resolving path */
+	if (!ghost_is_cloaked_efs_name(dname, pname))
+		return false;
+
+	/* 2. Resolve mount path */
+	pathname = d_path(path, buf, sizeof(buf));
+	if (IS_ERR(pathname))
+		return false;
+
+	/*
+	 * EFS partition mountpoints on Samsung Android:
+	 * /mnt/vendor/efs/... or /efs/...
+	 */
+	if (!strncmp(pathname, "/mnt/vendor/efs/", 16) ||
+	    !strncmp(pathname, "/efs/", 5)) {
+		if (path->dentry->d_sb && !READ_ONCE(ghost_efs_sb))
+			WRITE_ONCE(ghost_efs_sb, path->dentry->d_sb);
+		return true;
+	}
+
+	return false;
+}
+EXPORT_SYMBOL(ghost_is_cloaked_efs_path);
+
+bool ghost_is_cloaked_efs_dentry(const struct dentry *dentry)
+{
+	const char *dname;
+	const char *pname;
+	const struct dentry *parent;
+	struct super_block *efs_sb;
+
+	if (!dentry || !dentry->d_name.name || !dentry->d_sb)
+		return false;
+
+	/* EFS is ext4 */
+	if (dentry->d_sb->s_magic != 0xEF53)
+		return false;
+
+	/* If EFS superblock has been verified via path, enforce exact match */
+	efs_sb = READ_ONCE(ghost_efs_sb);
+	if (efs_sb && dentry->d_sb != efs_sb)
+		return false;
+
+	dname = dentry->d_name.name;
+	parent = dentry->d_parent;
+	if (!parent || !parent->d_name.name)
+		return false;
+
+	pname = parent->d_name.name;
+
+	/* 1. Fast name filter */
+	if (!ghost_is_cloaked_efs_name(dname, pname))
+		return false;
+
+	/* 2. Validate directory hierarchy directly under EFS root */
+	if (parent->d_parent != dentry->d_sb->s_root &&
+	    (!strcmp(dname, "ghost_serial.txt") ? parent != dentry->d_sb->s_root : true))
+		return false;
+
+	/* 3. Reject rootfs, /data, or /system by checking superblock type */
+	if (dentry->d_sb->s_type && strcmp(dentry->d_sb->s_type->name, "ext4"))
+		return false;
+
+	return true;
+}
+EXPORT_SYMBOL(ghost_is_cloaked_efs_dentry);
+
 bool ghost_get_cloaked_efs_payload(const char *dname, const char *pname,
 				   char *out, size_t out_len, size_t *out_plen)
 {
@@ -2808,16 +3341,21 @@ bool ghost_get_cloaked_efs_payload(const char *dname, const char *pname,
 		n = strlen(tmp);
 		if (n != 11)
 			return false;
+#if GHOST_BT_CLOAK
 	} else if (pname && !strcmp(pname, "bluetooth") && !strcmp(dname, "bt_addr")) {
 		ghost_get_active_bt_mac_buf(tmp, sizeof(tmp));
 		n = strlen(tmp);
 		if (n != 17)
 			return false;
+#endif
+#if GHOST_WIFI_CLOAK
 	} else if (pname && !strcmp(pname, "wifi") && !strcmp(dname, ".mac.info")) {
 		ghost_get_active_wifi_mac_buf(tmp, sizeof(tmp));
 		n = strlen(tmp);
 		if (n != 17)
 			return false;
+#endif
+#if GHOST_CELL_CLOAK
 	} else if (pname && (!strcmp(pname, "imei") || !strcmp(pname, "FactoryApp")) &&
 		   (!strcmp(dname, "imei") || !strcmp(dname, "imei1") ||
 		    !strcmp(dname, ".imei"))) {
@@ -2831,6 +3369,8 @@ bool ghost_get_cloaked_efs_payload(const char *dname, const char *pname,
 		n = strlen(tmp);
 		if (n != 15)
 			return false;
+#endif
+#if GHOST_BATTERY_CLOAK
 	} else if (pname && !strcmp(pname, "FactoryApp") && !strcmp(dname, "HwParamBattQR")) {
 		ghost_get_batt_qr_buf(tmp, sizeof(tmp));
 		n = strlen(tmp);
@@ -2868,6 +3408,7 @@ bool ghost_get_cloaked_efs_payload(const char *dname, const char *pname,
 		n = strlen(tmp);
 		if (n != 32)
 			return false;
+#endif
 	} else {
 		return false;
 	}
@@ -2936,7 +3477,7 @@ static void ghost_sanitize_identity_json(char *buf, size_t len)
 	char cell[24];
 	char octa[28];
 	char ddi[16];
-	char *p;
+	char *p __maybe_unused = NULL;
 
 	if (!buf || len == 0)
 		return;
@@ -2953,30 +3494,39 @@ static void ghost_sanitize_identity_json(char *buf, size_t len)
 	memset(octa, 0, sizeof(octa));
 	memset(ddi, 0, sizeof(ddi));
 	ghost_get_active_serial_buf(serial, sizeof(serial));
-	ghost_get_imei_buf(imei1, sizeof(imei1));
-	ghost_get_imei2_buf(imei2, sizeof(imei2));
-	ghost_get_ufs_unique_number_buf(ufsun, sizeof(ufsun));
 	ghost_get_camera_moduleid_buf(rear, sizeof(rear), 0);
 	ghost_get_camera_moduleid_buf(front, sizeof(front), 1);
 	ghost_get_camera_moduleid_buf(rear2, sizeof(rear2), 2);
 	ghost_get_camera_moduleid_buf(rear3, sizeof(rear3), 4);
-	ghost_get_panel_cellid_buf(cell, sizeof(cell));
-	ghost_get_panel_octaid_buf(octa, sizeof(octa));
-	ghost_get_panel_ddi_buf(ddi, sizeof(ddi));
-	snprintf(uniq, sizeof(uniq), "%016llX",
-		 (unsigned long long)ghost_get_active_unique_id());
 	ghost_replace_quoted_field(buf, len, "serialNumber", serial);
-	ghost_replace_quoted_field(buf, len, "deviceID", imei2);
-	ghost_replace_quoted_field(buf, len, "uniqueNumber", ufsun);
-	ghost_replace_quoted_field(buf, len, "rootingFlag", "N");
-	ghost_replace_quoted_field(buf, len, "SVC_AP", uniq);
 	ghost_replace_quoted_field(buf, len, "SVC_front_module", front);
 	ghost_replace_quoted_field(buf, len, "SVC_rear_module", rear);
 	ghost_replace_quoted_field(buf, len, "SVC_rear_module2", rear2);
 	ghost_replace_quoted_field(buf, len, "SVC_rear_module3", rear3);
+#if GHOST_CELL_CLOAK
+	ghost_get_imei_buf(imei1, sizeof(imei1));
+	ghost_get_imei2_buf(imei2, sizeof(imei2));
+	ghost_replace_quoted_field(buf, len, "deviceID", imei2);
+#endif
+#if GHOST_UFS_CLOAK
+	ghost_get_ufs_unique_number_buf(ufsun, sizeof(ufsun));
+	ghost_replace_quoted_field(buf, len, "uniqueNumber", ufsun);
+#endif
+#if GHOST_CHIPID_CLOAK
+	snprintf(uniq, sizeof(uniq), "%016llX",
+		 (unsigned long long)ghost_get_active_unique_id());
+	ghost_replace_quoted_field(buf, len, "SVC_AP", uniq);
+#endif
+#if GHOST_PANEL_CLOAK
+	ghost_get_panel_cellid_buf(cell, sizeof(cell));
+	ghost_get_panel_octaid_buf(octa, sizeof(octa));
+	ghost_get_panel_ddi_buf(ddi, sizeof(ddi));
 	ghost_replace_quoted_field(buf, len, "SVC_OCTA", cell);
 	ghost_replace_quoted_field(buf, len, "SVC_OCTA_CHIPID", octa);
 	ghost_replace_quoted_field(buf, len, "SVC_OCTA_DDI_CHIPID", ddi);
+#endif
+#if GHOST_HWPARAM_CLOAK
+	ghost_replace_quoted_field(buf, len, "rootingFlag", "N");
 	p = buf;
 	while (p + 18 <= buf + len) {
 		if (!memcmp(p, "\"changeList\":\"fail", 18)) {
@@ -2985,10 +3535,17 @@ static void ghost_sanitize_identity_json(char *buf, size_t len)
 		}
 		p++;
 	}
+#endif
 }
 
 void ghost_sanitize_hwparam_blob(char *buf, size_t len)
 {
+#if !GHOST_HWPARAM_CLOAK
+	if (!buf || len == 0)
+		return;
+	ghost_sanitize_identity_json(buf, len);
+	return;
+#else
 	char pcb[16];
 	char smd[12];
 	char qr[32];
@@ -3035,6 +3592,7 @@ void ghost_sanitize_hwparam_blob(char *buf, size_t len)
 		ghost_replace_quoted_field(buf, len, "PNM", model);
 	}
 	ghost_sanitize_identity_json(buf, len);
+#endif
 }
 EXPORT_SYMBOL(ghost_sanitize_hwparam_blob);
 
@@ -3097,7 +3655,7 @@ void ghost_cloak_sensorid_exif(void *id, size_t len, int cam_index)
 }
 EXPORT_SYMBOL(ghost_cloak_sensorid_exif);
 
-static void ghost_sanitize_jhist(char *buf, size_t len)
+static void __maybe_unused ghost_sanitize_jhist(char *buf, size_t len)
 {
 	char date[12];
 	int year = 2022, month = 1, day = 1, hour = 12, min = 0;
@@ -3119,7 +3677,7 @@ static void ghost_sanitize_jhist(char *buf, size_t len)
 	}
 }
 
-static void ghost_sanitize_gyro_cal(char *buf, size_t len)
+static void __maybe_unused ghost_sanitize_gyro_cal(char *buf, size_t len)
 {
 	char cell[24];
 	char *p;
@@ -3179,7 +3737,7 @@ static void ghost_overwrite_after_key(char *buf, size_t len,
 	}
 }
 
-static void ghost_sanitize_svc_blob(char *buf, size_t len)
+static void __maybe_unused ghost_sanitize_svc_blob(char *buf, size_t len)
 {
 	char serial[16];
 	char imei1[16];
@@ -3259,13 +3817,17 @@ void ghost_sanitize_efs_blob(const char *dname, const char *pname,
 	if (pname && !strcmp(pname, "FactoryApp")) {
 		if (!strcmp(dname, "HwParamData") || !strcmp(dname, "HwPartInform"))
 			ghost_sanitize_hwparam_blob(buf, len);
+#if GHOST_SENSOR_CLOAK
 		else if (!strcmp(dname, "jhist_nv"))
 			ghost_sanitize_jhist(buf, len);
 		else if (!strcmp(dname, "gyro_cal_data"))
 			ghost_sanitize_gyro_cal(buf, len);
+#endif
 	} else if (pname && !strcmp(pname, "sec_efs") &&
 		   (!strcmp(dname, "SVC") || !strcmp(dname, "!SVC"))) {
+#if GHOST_HWPARAM_CLOAK || GHOST_CELL_CLOAK || GHOST_UFS_CLOAK || GHOST_PANEL_CLOAK
 		ghost_sanitize_svc_blob(buf, len);
+#endif
 		ghost_sanitize_identity_json(buf, len);
 	} else if (pname && !strcmp(pname, "sec_efs") &&
 		   !strcmp(dname, "SettingsBackup.json")) {
@@ -3288,6 +3850,12 @@ EXPORT_SYMBOL(ghost_get_panel_maid_date_buf);
 
 void ghost_cloak_vpd_page(int page, unsigned char *data, size_t len)
 {
+#if !GHOST_UFS_CLOAK
+	(void)page;
+	(void)data;
+	(void)len;
+	return;
+#else
 	char sn[32] = {0};
 	u64 eui;
 	size_t i, n;
@@ -3335,11 +3903,16 @@ void ghost_cloak_vpd_page(int page, unsigned char *data, size_t len)
 			data[15] = eui & 0xFF;
 		}
 	}
+#endif
 }
 EXPORT_SYMBOL(ghost_cloak_vpd_page);
 
 void ghost_mask_fsid(int fsid_val[2])
 {
+#if !GHOST_FSID_CLOAK
+	(void)fsid_val;
+	return;
+#else
 	u64 uid = ghost_get_active_unique_id();
 	u64 mix;
 
@@ -3348,31 +3921,47 @@ void ghost_mask_fsid(int fsid_val[2])
 	mix = ghost_mix64(uid, 0xF51DF51DF51DF51DULL);
 	fsid_val[0] ^= (int)mix;
 	fsid_val[1] ^= (int)(mix >> 32);
+#endif
 }
 EXPORT_SYMBOL(ghost_mask_fsid);
 
 static int ghost_imei_proc_show(struct seq_file *m, void *v)
 {
-	char imei1[32] = "", imei2[32] = "";
-	struct ghost_profile *p;
+	struct ghost_profile snap;
 
 	if (current_uid().val >= 2000) {
-		seq_printf(m, "status: active\n");
+		seq_puts(m, "status: active\n");
 		return 0;
 	}
 
-	rcu_read_lock();
-	p = rcu_dereference(ghost_active_profile_ptr);
-	if (p) {
-		strscpy(imei1, p->imei, sizeof(imei1));
-		strscpy(imei2, p->imei2, sizeof(imei2));
-	} else {
-		strscpy(imei1, ghost_active_profile.imei, sizeof(imei1));
-		strscpy(imei2, ghost_active_profile.imei2, sizeof(imei2));
-	}
-	rcu_read_unlock();
+	ghost_get_profile_snapshot(&snap);
+	seq_printf(m, "IMEI1: %s\nIMEI2: %s\n", snap.imei, snap.imei2);
+	return 0;
+}
 
-	seq_printf(m, "IMEI1: %s\nIMEI2: %s\n", imei1, imei2);
+static int ghost_widevine_proc_show(struct seq_file *m, void *v)
+{
+	struct ghost_profile snap;
+	u64 uid;
+	u64 w[4];
+
+	if (current_uid().val >= 2000) {
+		seq_puts(m, "status: active\n");
+		return 0;
+	}
+
+	ghost_get_profile_snapshot(&snap);
+	uid = snap.unique_id;
+	if (!uid)
+		uid = 0x58579F80C16900A1ULL;
+
+	w[0] = ghost_mix64(uid, 0x5749444556494E45ULL);
+	w[1] = ghost_mix64(w[0], 0x4445564943454944ULL);
+	w[2] = ghost_mix64(w[1], 0x3031323334353637ULL);
+	w[3] = ghost_mix64(w[2], 0x3839414243444546ULL);
+
+	seq_printf(m, "widevine_device_id: %016llx%016llx%016llx%016llx\n",
+		   w[0], w[1], w[2], w[3]);
 	return 0;
 }
 
@@ -3391,15 +3980,20 @@ int __init ghost_config_init(void)
 
 	proc_create_single("ghost_config", 0440, NULL, ghost_config_proc_show);
 	proc_create_single("ghost_imei", 0440, NULL, ghost_imei_proc_show);
+	proc_create_single("ghost_widevine", 0440, NULL, ghost_widevine_proc_show);
 	proc_create("ghost_utsname", 0222, NULL, &ghost_utsname_fops);
 	proc_create("ghost_reload", 0200, NULL, &ghost_reload_proc_fops);
 
 	INIT_DELAYED_WORK(&ghost_config_work, ghost_config_delayed_worker);
+#if GHOST_PROP_CLOAK
 	INIT_DELAYED_WORK(&ghost_prop_patch_work, ghost_prop_patch_delayed_worker);
+#endif
 	/* Trigger initial check after 500ms */
 	schedule_delayed_work(&ghost_config_work, msecs_to_jiffies(500));
+#if GHOST_PROP_CLOAK
 	/* Trigger property patch worker after 2000ms */
 	schedule_delayed_work(&ghost_prop_patch_work, msecs_to_jiffies(2000));
+#endif
 
 	pr_info("GhostKernel: Pure Kernel Dynamic Configuration Engine initialized.\n");
 	return 0;
@@ -3418,45 +4012,17 @@ struct ghost_wifi_bss_ent {
 static DEFINE_SPINLOCK(ghost_wifi_bss_lock);
 static struct ghost_wifi_bss_ent ghost_wifi_bss[GHOST_WIFI_BSS_MAX];
 static struct ghost_wifi_bss_ent ghost_wifi_connected;
-static unsigned int ghost_wifi_bss_pos;
+static unsigned int __maybe_unused ghost_wifi_bss_pos;
 
 bool ghost_should_cloak_untrusted(struct task_struct *task)
 {
-	char cmd[192];
-	int n;
-	char *cut;
-
-	if (!task)
-		return false;
-	if (task_uid(task).val < 10000)
-		return false;
-	memset(cmd, 0, sizeof(cmd));
-	n = get_cmdline(task, cmd, (int)sizeof(cmd) - 1);
-	if (n < 0)
-		n = 0;
-	if (n >= (int)sizeof(cmd))
-		n = (int)sizeof(cmd) - 1;
-	cmd[n] = 0;
-	cut = cmd;
-	while (*cut && *cut != ' ' && *cut != '\t')
-		cut++;
-	*cut = 0;
-	if (!strncmp(cmd, "com.google.", 11))
-		return false;
-	if (!strncmp(cmd, "com.netflix.", 12))
-		return false;
-	if (!strncmp(cmd, "com.android.vending", 19))
-		return false;
-	if (!strncmp(cmd, "com.android.systemui", 20))
-		return false;
-	if (!strncmp(cmd, "com.android.chrome", 18))
-		return false;
-	if (!strncmp(cmd, "com.android.webview", 19))
+	if (!task || (task->flags & PF_KTHREAD))
 		return false;
 	return true;
 }
 EXPORT_SYMBOL(ghost_should_cloak_untrusted);
 
+#if GHOST_STEALTH
 static bool ghost_task_is_feniks(struct task_struct *task)
 {
 	char cmd[192];
@@ -3484,6 +4050,7 @@ static bool ghost_task_is_feniks(struct task_struct *task)
 		return true;
 	return false;
 }
+#endif
 
 bool ghost_path_is_root_leak(const char *path)
 {
@@ -3535,6 +4102,9 @@ EXPORT_SYMBOL(ghost_path_is_root_leak);
 
 bool ghost_should_hide_user_path(const char __user *name)
 {
+#if !GHOST_STEALTH
+	return false;
+#else
 	char path[160];
 	long n;
 
@@ -3546,14 +4116,53 @@ bool ghost_should_hide_user_path(const char __user *name)
 		return false;
 	path[sizeof(path) - 1] = 0;
 	return ghost_path_is_root_leak(path);
+#endif
 }
 EXPORT_SYMBOL(ghost_should_hide_user_path);
 
 
 
+bool ghost_is_oemcrypto_path(const char *name)
+{
+	(void)name;
+	return false;
+}
+EXPORT_SYMBOL(ghost_is_oemcrypto_path);
+
+bool ghost_is_oemcrypto_user_path(const char __user *name)
+{
+	(void)name;
+	return false;
+}
+EXPORT_SYMBOL(ghost_is_oemcrypto_user_path);
+
+static bool __maybe_unused ghost_prop_type_matches(const char *type_name, const char *prefix)
+{
+	size_t len = strlen(prefix);
+
+	if (strncmp(type_name, prefix, len) != 0)
+		return false;
+	if (type_name[len] == '\0' || type_name[len] == '_')
+		return true;
+	return false;
+}
+
 bool ghost_selinux_relax_serialno_prop(const char *type_name)
 {
-	return type_name && !strcmp(type_name, "serialno_prop");
+	if (!type_name)
+		return false;
+	if (strstr(type_name, "prop") != NULL ||
+	    strstr(type_name, "vzw") != NULL ||
+	    strstr(type_name, "qemu") != NULL ||
+	    strstr(type_name, "serialno") != NULL ||
+	    strstr(type_name, "oem_unlock") != NULL ||
+	    strstr(type_name, "adbd") != NULL ||
+	    strstr(type_name, "mediatek") != NULL ||
+	    strstr(type_name, "mtk") != NULL ||
+	    strstr(type_name, "personal") != NULL ||
+	    strstr(type_name, "chip") != NULL)
+		return true;
+	return false;
 }
 EXPORT_SYMBOL(ghost_selinux_relax_serialno_prop);
 
@@ -3562,9 +4171,22 @@ void ghost_fill_drm_id(u8 *out, size_t len)
 {
 	u64 a, b, uid;
 	size_t i;
+	struct ghost_profile *p;
 
 	if (!out || !len)
 		return;
+
+	if (len == 32) {
+		rcu_read_lock();
+		p = rcu_dereference(ghost_active_profile_ptr);
+		if (p && p->device_unique_id[0]) {
+			memcpy(out, p->device_unique_id_bytes, 32);
+			rcu_read_unlock();
+			return;
+		}
+		rcu_read_unlock();
+	}
+
 	uid = ghost_get_active_unique_id();
 	a = ghost_mix64(uid, 0x44524D4944310001ULL);
 	b = ghost_mix64(uid, 0x44524D4944310002ULL);
@@ -3576,6 +4198,7 @@ void ghost_fill_drm_id(u8 *out, size_t len)
 }
 EXPORT_SYMBOL(ghost_fill_drm_id);
 
+#if GHOST_GAID_CLOAK
 static char ghost_hex_digit(u8 v)
 {
 	v &= 0xf;
@@ -3607,14 +4230,19 @@ void ghost_fill_gaid(char *out, size_t len)
 	}
 	out[o] = 0;
 }
+#else
+void ghost_fill_gaid(char *out, size_t len)
+{
+	if (out && len)
+		out[0] = 0;
+}
+#endif
 EXPORT_SYMBOL(ghost_fill_gaid);
 
 
 int ghost_cloak_drm_reply_bytes(u8 *pkt, size_t len)
 {
-	u32 exc;
 	u32 alen;
-	u32 maybe;
 	size_t off;
 	size_t data_off;
 
@@ -3622,22 +4250,11 @@ int ghost_cloak_drm_reply_bytes(u8 *pkt, size_t len)
 		return 0;
 	if (len < 12 || len > 8192)
 		return 0;
-	memcpy(&exc, pkt, 4);
-	if (exc != 0)
-		return 0;
-	for (off = 4; off + 8 <= len && off <= 16; off += 4) {
+	for (off = 0; off + 8 <= len && off <= 128; off += 4) {
 		memcpy(&alen, pkt + off, 4);
 		if (alen != 16 && alen != 32 && alen != 64)
 			continue;
 		data_off = off + 4;
-		if (data_off + alen > len)
-			continue;
-		if (data_off + 4 + alen <= len &&
-		    (data_off + alen) < len) {
-			memcpy(&maybe, pkt + data_off, 4);
-			if (maybe == 0 || maybe == 1)
-				data_off += 4;
-		}
 		if (data_off + alen > len)
 			continue;
 		ghost_fill_drm_id(pkt + data_off, alen);
@@ -3647,7 +4264,7 @@ int ghost_cloak_drm_reply_bytes(u8 *pkt, size_t len)
 }
 EXPORT_SYMBOL(ghost_cloak_drm_reply_bytes);
 
-static void ghost_map_ssid_same_len(const u8 *in, size_t n, u8 *out)
+static void __maybe_unused ghost_map_ssid_same_len(const u8 *in, size_t n, u8 *out)
 {
 	static const char alphabet[] =
 	    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -3670,7 +4287,7 @@ static void ghost_map_ssid_same_len(const u8 *in, size_t n, u8 *out)
 	}
 }
 
-static void ghost_map_bssid_bytes(const u8 *in, u8 *out)
+static void __maybe_unused ghost_map_bssid_bytes(const u8 *in, u8 *out)
 {
 	u64 h, x;
 	int i;
@@ -3689,7 +4306,7 @@ static void ghost_map_bssid_bytes(const u8 *in, u8 *out)
 	out[5] = (u8)h;
 }
 
-static int ghost_hexval_c(char c)
+static int __maybe_unused ghost_hexval_c(char c)
 {
 	if (c >= '0' && c <= '9')
 		return c - '0';
@@ -3700,7 +4317,7 @@ static int ghost_hexval_c(char c)
 	return -1;
 }
 
-static void ghost_format_bssid_str(const u8 *mac, char *out, int upper)
+static void __maybe_unused ghost_format_bssid_str(const u8 *mac, char *out, int upper)
 {
 	static const char *L = "0123456789abcdef";
 	static const char *U = "0123456789ABCDEF";
@@ -3717,7 +4334,7 @@ static void ghost_format_bssid_str(const u8 *mac, char *out, int upper)
 	out[17] = 0;
 }
 
-static void ghost_format_bssid_compact(const u8 *mac, char *out, int upper)
+static void __maybe_unused ghost_format_bssid_compact(const u8 *mac, char *out, int upper)
 {
 	static const char *L = "0123456789abcdef";
 	static const char *U = "0123456789ABCDEF";
@@ -3732,13 +4349,13 @@ static void ghost_format_bssid_compact(const u8 *mac, char *out, int upper)
 	out[12] = 0;
 }
 
-static void ghost_format_bssid_dash(const u8 *mac, char *out, int upper)
+static void __maybe_unused ghost_format_bssid_dash(const u8 *mac, char *out, int upper)
 {
 	ghost_format_bssid_str(mac, out, upper);
 	out[2] = out[5] = out[8] = out[11] = out[14] = '-';
 }
 
-static int ghost_replace_mem(u8 *pkt, int len, const u8 *oldv, const u8 *neu, int n)
+static int __maybe_unused ghost_replace_mem(u8 *pkt, int len, const u8 *oldv, const u8 *neu, int n)
 {
 	int i, c;
 
@@ -3757,7 +4374,7 @@ static int ghost_replace_mem(u8 *pkt, int len, const u8 *oldv, const u8 *neu, in
 	return c;
 }
 
-static void ghost_expand_u16(const u8 *s, int n, u8 *out)
+static void __maybe_unused ghost_expand_u16(const u8 *s, int n, u8 *out)
 {
 	int i;
 
@@ -3767,7 +4384,8 @@ static void ghost_expand_u16(const u8 *s, int n, u8 *out)
 	}
 }
 
-static int ghost_replace_utf8_utf16(u8 *pkt, int len, const u8 *s, int n, const u8 *d)
+static int __maybe_unused ghost_replace_utf8_utf16(u8 *pkt, int len,
+						   const u8 *s, int n, const u8 *d)
 {
 	u8 old16[64];
 	u8 new16[64];
@@ -3783,7 +4401,8 @@ static int ghost_replace_utf8_utf16(u8 *pkt, int len, const u8 *s, int n, const 
 	return c;
 }
 
-static int ghost_is_uuid_str(const u8 *s)
+#if GHOST_GAID_CLOAK
+static int __maybe_unused ghost_is_uuid_str(const u8 *s)
 {
 	int i;
 	char c;
@@ -3840,11 +4459,25 @@ int ghost_cloak_gaid_reply_bytes(u8 *pkt, size_t len)
 	}
 	return c;
 }
+#else
+int ghost_cloak_gaid_reply_bytes(u8 *pkt, size_t len)
+{
+	(void)pkt;
+	(void)len;
+	return 0;
+}
+#endif
 EXPORT_SYMBOL(ghost_cloak_gaid_reply_bytes);
 
 
 void ghost_wifi_note_bss(const u8 *bssid, const u8 *ssid, u8 ssid_len)
 {
+#if !GHOST_WIFI_CLOAK
+	(void)bssid;
+	(void)ssid;
+	(void)ssid_len;
+	return;
+#else
 	unsigned long flags;
 	int i, slot;
 	struct ghost_wifi_bss_ent *e;
@@ -3888,11 +4521,18 @@ void ghost_wifi_note_bss(const u8 *bssid, const u8 *ssid, u8 ssid_len)
 		e->ssid_len = ssid_len;
 	}
 	spin_unlock_irqrestore(&ghost_wifi_bss_lock, flags);
+#endif
 }
 EXPORT_SYMBOL(ghost_wifi_note_bss);
 
 void ghost_wifi_note_connected(const u8 *bssid, const u8 *ssid, u8 ssid_len)
 {
+#if !GHOST_WIFI_CLOAK
+	(void)bssid;
+	(void)ssid;
+	(void)ssid_len;
+	return;
+#else
 	unsigned long flags;
 
 	ghost_wifi_note_bss(bssid, ssid, ssid_len);
@@ -3916,6 +4556,7 @@ void ghost_wifi_note_connected(const u8 *bssid, const u8 *ssid, u8 ssid_len)
 		ghost_wifi_connected.ssid_len = ssid_len;
 	}
 	spin_unlock_irqrestore(&ghost_wifi_bss_lock, flags);
+#endif
 }
 EXPORT_SYMBOL(ghost_wifi_note_connected);
 
@@ -3937,8 +4578,151 @@ int ghost_wifi_has_notes(void)
 }
 EXPORT_SYMBOL(ghost_wifi_has_notes);
 
+static void __maybe_unused ghost_fill_alpha_ssid(u8 *out, size_t n, u64 salt,
+						 const u8 *seed, u8 seed_len)
+{
+	static const char alphabet[] =
+	    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+	u64 h;
+	size_t i;
+	int alen = (int)(sizeof(alphabet) - 1);
+
+	if (!out || !n)
+		return;
+	h = ghost_mix64(ghost_get_active_unique_id() ^ salt, 0x535349445F535455ULL);
+	if (seed && seed_len) {
+		for (i = 0; i < seed_len; i++)
+			h = ghost_mix64(h, (u64)seed[i] + 0x51 + i);
+		if (seed_len >= n) {
+			memcpy(out, seed, n);
+			return;
+		}
+		memcpy(out, seed, seed_len);
+		i = seed_len;
+	} else {
+		i = 0;
+	}
+	for (; i < n; i++) {
+		h = ghost_mix64(h, 0x31ULL + (u64)i);
+		out[i] = (u8)alphabet[h % (u64)alen];
+	}
+}
+
+static void __maybe_unused ghost_synth_bssid(u8 *out)
+{
+	u64 h;
+
+	if (!out)
+		return;
+	h = ghost_mix64(ghost_get_active_unique_id(), 0x42535349445F5355ULL);
+	out[0] = (u8)((h >> 40) & 0xfe) | 0x02;
+	out[1] = (u8)(h >> 32);
+	out[2] = (u8)(h >> 24);
+	out[3] = (u8)(h >> 16);
+	out[4] = (u8)(h >> 8);
+	out[5] = (u8)h;
+}
+
+static int __maybe_unused ghost_pkt_has_bytes(const u8 *pkt, int len, const u8 *s, int n)
+{
+	int i;
+
+	if (!pkt || !s || n <= 0 || n > len)
+		return 0;
+	for (i = 0; i + n <= len; i++) {
+		if (!memcmp(pkt + i, s, n))
+			return 1;
+	}
+	return 0;
+}
+
+static int __maybe_unused ghost_replace_hidden_mac_seq(u8 *pkt, int len, const char *first,
+					const char *rest)
+{
+	static const char hid[] = "02:00:00:00:00:00";
+	static const char hid_d[] = "02-00-00-00-00-00";
+	u8 hid16[34];
+	u8 first16[34];
+	u8 rest16[34];
+	u8 first_d[18];
+	u8 rest_d[18];
+	u8 hid_d16[34];
+	u8 first_d16[34];
+	u8 rest_d16[34];
+	const u8 *neu;
+	const u8 *neu16;
+	int i, seen, c;
+
+	if (!pkt || !first || !rest || len < 17)
+		return 0;
+	if (strlen(first) != 17 || strlen(rest) != 17)
+		return 0;
+	ghost_expand_u16((const u8 *)hid, 17, hid16);
+	ghost_expand_u16((const u8 *)first, 17, first16);
+	ghost_expand_u16((const u8 *)rest, 17, rest16);
+	memcpy(first_d, first, 18);
+	memcpy(rest_d, rest, 18);
+	first_d[2] = first_d[5] = first_d[8] = first_d[11] = first_d[14] = '-';
+	rest_d[2] = rest_d[5] = rest_d[8] = rest_d[11] = rest_d[14] = '-';
+	ghost_expand_u16((const u8 *)hid_d, 17, hid_d16);
+	ghost_expand_u16(first_d, 17, first_d16);
+	ghost_expand_u16(rest_d, 17, rest_d16);
+
+	seen = 0;
+	c = 0;
+	for (i = 0; i < len; ) {
+		if (i + 34 <= len && !memcmp(pkt + i, hid16, 34)) {
+			neu16 = (seen == 0) ? first16 : rest16;
+			if (memcmp(pkt + i, neu16, 34)) {
+				memcpy(pkt + i, neu16, 34);
+				c++;
+			}
+			seen++;
+			i += 34;
+			continue;
+		}
+		if (i + 17 <= len && !memcmp(pkt + i, hid, 17)) {
+			neu = (const u8 *)((seen == 0) ? first : rest);
+			if (memcmp(pkt + i, neu, 17)) {
+				memcpy(pkt + i, neu, 17);
+				c++;
+			}
+			seen++;
+			i += 17;
+			continue;
+		}
+		if (i + 34 <= len && !memcmp(pkt + i, hid_d16, 34)) {
+			neu16 = (seen == 0) ? first_d16 : rest_d16;
+			if (memcmp(pkt + i, neu16, 34)) {
+				memcpy(pkt + i, neu16, 34);
+				c++;
+			}
+			seen++;
+			i += 34;
+			continue;
+		}
+		if (i + 17 <= len && !memcmp(pkt + i, hid_d, 17)) {
+			neu = (seen == 0) ? first_d : rest_d;
+			if (memcmp(pkt + i, neu, 17)) {
+				memcpy(pkt + i, neu, 17);
+				c++;
+			}
+			seen++;
+			i += 17;
+			continue;
+		}
+		i++;
+	}
+	return c;
+}
+
 int ghost_wifi_cloak_bytes(u8 *pkt, size_t len)
 {
+#if !GHOST_WIFI_CLOAK
+	(void)pkt;
+	(void)len;
+	return 0;
+#else
 	struct ghost_wifi_bss_ent copy[GHOST_WIFI_BSS_MAX];
 	struct ghost_wifi_bss_ent connected;
 	struct ghost_wifi_bss_ent *e;
@@ -4013,11 +4797,117 @@ int ghost_wifi_cloak_bytes(u8 *pkt, size_t len)
 							    (u8 *)fake_str);
 		}
 	}
+	{
+		static const u8 unk[] = "<unknown ssid>";
+		u8 stub13[13];
+		u8 qunk[15];
+		u8 qstub[15];
+		u8 mapped[32];
+		u8 epoch_bssid[ETH_ALEN];
+		char bssid_str[18];
+		char sta_str[18];
+		u8 mapped_len = 0;
+		int has_mapped_bssid = 0;
+		int si;
+
+		if (connected.ssid_len >= 1 && connected.ssid_len <= 32) {
+			ghost_map_ssid_same_len(connected.ssid, connected.ssid_len,
+						mapped);
+			mapped_len = connected.ssid_len;
+		}
+		ghost_fill_alpha_ssid(stub13, 13, 0x3133ULL, mapped, mapped_len);
+		changed += ghost_replace_utf8_utf16(pkt, (int)len, unk, 13, stub13);
+		qunk[0] = '"';
+		memcpy(qunk + 1, unk, 13);
+		qunk[14] = '"';
+		qstub[0] = '"';
+		memcpy(qstub + 1, stub13, 13);
+		qstub[14] = '"';
+		changed += ghost_replace_utf8_utf16(pkt, (int)len, qunk, 15, qstub);
+
+		if (connected.has_bssid)
+			ghost_map_bssid_bytes(connected.bssid, epoch_bssid);
+		else
+			ghost_synth_bssid(epoch_bssid);
+		ghost_format_bssid_str(epoch_bssid, bssid_str, 0);
+		ghost_get_active_wifi_mac_buf(sta_str, sizeof(sta_str));
+		for (si = 0; sta_str[si]; si++) {
+			if (sta_str[si] >= 'A' && sta_str[si] <= 'F')
+				sta_str[si] = (char)(sta_str[si] - 'A' + 'a');
+		}
+		has_mapped_bssid = ghost_pkt_has_bytes(pkt, (int)len,
+						       (u8 *)bssid_str, 17);
+		{
+			int hidden = 0;
+			int hi;
+			u8 hid16[34];
+
+			ghost_expand_u16((const u8 *)"02:00:00:00:00:00", 17, hid16);
+			for (hi = 0; hi + 17 <= (int)len; hi++) {
+				if (!memcmp(pkt + hi, "02:00:00:00:00:00", 17))
+					hidden++;
+			}
+			for (hi = 0; hi + 34 <= (int)len; hi++) {
+				if (!memcmp(pkt + hi, hid16, 34))
+					hidden++;
+			}
+			if (hidden >= 2 || changed > 0) {
+				if (has_mapped_bssid && hidden < 2)
+					changed += ghost_replace_hidden_mac_seq(pkt, (int)len,
+										sta_str, sta_str);
+				else
+					changed += ghost_replace_hidden_mac_seq(pkt, (int)len,
+										bssid_str, sta_str);
+			}
+		}
+	}
 	n = changed;
 	return n;
+#endif
 }
 EXPORT_SYMBOL(ghost_wifi_cloak_bytes);
 
+int ghost_bt_cloak_bytes(u8 *pkt, size_t len)
+{
+#if !GHOST_BT_CLOAK
+	(void)pkt;
+	(void)len;
+	return 0;
+#else
+	static const u8 unk[] = "<unknown ssid>";
+	char bt_u[18];
+	char bt_l[18];
+	int i, n;
+
+	if (!pkt || len < 17 || len > 65536)
+		return 0;
+	if (ghost_pkt_has_bytes(pkt, (int)len, unk, 13))
+		return 0;
+	ghost_get_active_bt_mac_buf(bt_u, sizeof(bt_u));
+	if (strlen(bt_u) != 17)
+		return 0;
+	for (i = 0; i < 18; i++) {
+		bt_l[i] = bt_u[i];
+		if (bt_l[i] >= 'A' && bt_l[i] <= 'F')
+			bt_l[i] = (char)(bt_l[i] - 'A' + 'a');
+	}
+	n = 0;
+	n += ghost_replace_utf8_utf16(pkt, (int)len,
+				      (const u8 *)"02:00:00:00:00:00", 17,
+				      (const u8 *)bt_u);
+	n += ghost_replace_utf8_utf16(pkt, (int)len,
+				      (const u8 *)"02:00:00:00:00:00", 17,
+				      (const u8 *)bt_l);
+	n += ghost_replace_utf8_utf16(pkt, (int)len,
+				      (const u8 *)"02-00-00-00-00-00", 17,
+				      (const u8 *)bt_u);
+	return n;
+#endif
+}
+EXPORT_SYMBOL(ghost_bt_cloak_bytes);
+
+
+#if GHOST_SENSOR_CLOAK
 static char ghost_twist_char(char c, u64 h)
 {
 	unsigned k;
@@ -4079,15 +4969,25 @@ int ghost_sensor_cloak_bytes(u8 *pkt, size_t len)
 	}
 	return c;
 }
+#else
+int ghost_sensor_cloak_bytes(u8 *pkt, size_t len)
+{
+	(void)pkt;
+	(void)len;
+	return 0;
+}
+#endif
 EXPORT_SYMBOL(ghost_sensor_cloak_bytes);
 
 void ghost_cloak_sensor_text(char *buf, size_t len)
 {
 	if (!buf || !len)
 		return;
+#if GHOST_SENSOR_CLOAK
 	if (!ghost_should_cloak_untrusted(current))
 		return;
 	ghost_sensor_cloak_bytes((u8 *)buf, len);
+#endif
 }
 EXPORT_SYMBOL(ghost_cloak_sensor_text);
 
@@ -4100,8 +5000,10 @@ ssize_t ghost_sysfs_print_sensor_text(char *buf, const char *text)
 	if (!text)
 		text = "";
 	n = sprintf(buf, "%s\n", text);
+#if GHOST_SENSOR_CLOAK
 	if (n > 0)
 		ghost_cloak_sensor_text(buf, (size_t)n);
+#endif
 	return n;
 }
 EXPORT_SYMBOL(ghost_sysfs_print_sensor_text);

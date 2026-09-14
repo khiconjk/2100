@@ -234,7 +234,7 @@ static int __get_dpui_field(enum dpui_key key, char *buf)
 			"\"%s\":\"%s\"", dpui_key_name[key], dpui.field[key].default_value);
 	}
 
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_PANEL_CLOAK
 	{
 		char gid[40] = {0};
 		if (key == DPUI_KEY_CELLID)

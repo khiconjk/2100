@@ -609,7 +609,7 @@ static void sec_debug_store_extra_info(char (*keys)[MAX_ITEM_KEY_LEN], int nr_ke
 		}
 
 		v = p + MAX_ITEM_KEY_LEN;
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_HWPARAM_CLOAK
 		if (!strcmp(keys[i], "ID")) {
 			memset(gid, 0, sizeof(gid));
 			ghost_get_extra_info_id_buf(gid, sizeof(gid));
@@ -788,7 +788,7 @@ static void __init sec_debug_extra_info_buffer_init(void)
 
 static void __init sec_debug_set_extra_info_id(void)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_HWPARAM_CLOAK
 	char gid[16];
 
 	memset(gid, 0, sizeof(gid));
@@ -818,7 +818,7 @@ static void secdbg_exin_set_ktime(void)
 
 void secdbg_exin_set_hwid(int asb_ver, int psite, const char *dramstr)
 {
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_HWPARAM_CLOAK
 	ghost_get_asb_psite(&asb_ver, &psite);
 #endif
 	set_item_val("ASB", "%d", asb_ver);

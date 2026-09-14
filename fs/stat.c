@@ -40,7 +40,7 @@ static void ghost_cloak_identity_stat(struct kstat *stat, const struct path *pat
 
 	dname = path->dentry->d_name.name;
 	pname = path->dentry->d_parent->d_name.name;
-	if (!ghost_is_cloaked_efs_name(dname, pname))
+	if (!ghost_is_cloaked_efs_path(path))
 		return;
 	if (!strcmp(dname, "HwParamBattQR"))
 		stat->size = 28;
@@ -256,6 +256,11 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 		lookup_flags &= ~LOOKUP_AUTOMOUNT;
 	if (flags & AT_EMPTY_PATH)
 		lookup_flags |= LOOKUP_EMPTY;
+
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
+	if (ghost_is_oemcrypto_user_path(filename))
+		return -ENOENT;
+#endif
 
 retry:
 	error = user_path_at(dfd, filename, lookup_flags, &path);

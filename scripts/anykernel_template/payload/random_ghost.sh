@@ -92,6 +92,9 @@ UFS_IDX=$(( $(od -An -tu4 -N2 /dev/urandom | tr -d ' ') % 5 ))
 UFS_MODEL=${UFS_ARR[$UFS_IDX]}
 UFS_SERIAL=$(printf "0x%08x" $(( $(od -An -tu4 -N4 /dev/urandom | tr -d ' ') )))
 
+DEVICE_UNIQUE_ID=$(head -c 32 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n')
+[ ${#DEVICE_UNIQUE_ID} -lt 64 ] && DEVICE_UNIQUE_ID="9f80c1694a12bc7800a15857209f80c11100494d453100014d41430000554653"
+
 # 5. ENVIRONMENT & SENSOR TELEMETRY METRICS
 UPTIME_DAYS=$(( ($(od -An -tu4 -N2 /dev/urandom | tr -d ' ') % 38) + 4 ))
 BOOT_COUNT=$(( ($(od -An -tu4 -N2 /dev/urandom | tr -d ' ') % 65) + 18 ))
@@ -126,7 +129,7 @@ soc_family = samsung
 build_fingerprint = samsung/o1sxeea/o1s:12/SP1A.210812.016/SM-G991BXXS3BULC:user/release-keys
 build_desc = o1sxeea-user 12 SP1A.210812.016 SM-G991BXXS3BULC release-keys
 build_id = SP1A.210812.016
-security_patch = 2022-01-01
+security_patch = 2024-08-01
 
 [HARDWARE_IDS]
 serialno = $SERIALNO
@@ -136,6 +139,7 @@ wifi_mac = $WIFI_MAC
 bt_mac = $BT_MAC
 ufs_serial = $UFS_SERIAL
 ufs_model = $UFS_MODEL
+device_unique_id = $DEVICE_UNIQUE_ID
 
 [ENVIRONMENT_METRICS]
 uptime_days = $UPTIME_DAYS

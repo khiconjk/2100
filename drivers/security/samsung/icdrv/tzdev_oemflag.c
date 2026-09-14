@@ -59,18 +59,12 @@ static uint32_t run_cmd_teegris(uint32_t cmd, uint32_t arg1,
 
 int set_tamper_fuse(enum oemflag_id name)
 {
-	int ret;
-
-	ret = run_cmd_teegris(IRS_SET_FLAG_VALUE_CMD, 0, name, 1);
-
-	return ret;
+	(void)name;
+	return 0;
 }
 
 int get_tamper_fuse(enum oemflag_id name)
 {
-	int ret;
-
-	ret = run_cmd_teegris(IRS_GET_FLAG_VAL_CMD, 1, name, 0);
-
-	return ret;
+	(void)name;
+	return 0;
 }

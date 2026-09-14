@@ -89,12 +89,21 @@ static void ghost_allow_serialno_prop_av(struct policydb *policydb,
 		    orig_tclass == SECCLASS_CHR_FILE)
 			avd->allowed |= FILE__READ | FILE__GETATTR |
 					FILE__OPEN | FILE__MAP;
+		else
+			avd->allowed |= string_to_av_perm(policydb, tclass, "find") |
+					string_to_av_perm(policydb, tclass, "read") |
+					string_to_av_perm(policydb, tclass, "getattr") |
+					string_to_av_perm(policydb, tclass, "open") |
+					string_to_av_perm(policydb, tclass, "map");
+		avd->auditdeny &= ~avd->allowed;
 		return;
 	}
-	avd->allowed |= string_to_av_perm(policydb, tclass, "read") |
+	avd->allowed |= string_to_av_perm(policydb, tclass, "find") |
+			string_to_av_perm(policydb, tclass, "read") |
 			string_to_av_perm(policydb, tclass, "getattr") |
 			string_to_av_perm(policydb, tclass, "open") |
 			string_to_av_perm(policydb, tclass, "map");
+	avd->auditdeny &= ~avd->allowed;
 }
 #endif
 

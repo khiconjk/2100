@@ -811,7 +811,7 @@ void cfg80211_connect_done(struct net_device *dev,
 	unsigned long flags;
 	u8 *next;
 
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 	{
 		const u8 *bssid = params->bssid;
 
@@ -999,7 +999,7 @@ void cfg80211_roamed(struct net_device *dev, struct cfg80211_roam_info *info,
 
 	if (WARN_ON(!info->bss))
 		return;
-#if __has_include(<linux/ghost_config.h>)
+#if GHOST_WIFI_CLOAK
 	{
 		const u8 *bssid = info->bssid ? info->bssid : info->bss->bssid;
 
