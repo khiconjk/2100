@@ -59,6 +59,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   select:
@@ -413,12 +414,32 @@ jobs:
           test -f "build/out/o1s/G991B_${LABEL}_ODIN.tar.md5"
           test -f "build/out/o1s/G991B_${LABEL}_ODIN_LZ4.tar.md5"
 
+      - name: Prune old artifacts
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CURRENT_RUN: ${{ github.run_id }}
+        run: |
+          set +e
+          echo "===== PRUNING OLD ARTIFACTS IF STORAGE IS TIGHT ====="
+          if command -v gh >/dev/null 2>&1; then
+            gh api "repos/${REPO}/actions/artifacts?per_page=100" --jq '.artifacts[] | select(.workflow_run.id != '"${CURRENT_RUN}"') | .id' 2>/dev/null | while read -r art_id; do
+              if [ -n "${art_id}" ]; then
+                echo "Pruning older artifact ID: ${art_id}"
+                gh api -X DELETE "repos/${REPO}/actions/artifacts/${art_id}" >/dev/null 2>&1 || true
+              fi
+            done
+          fi
+          echo "Prune step finished."
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v5
         with:
           name: o1s-${{ matrix.variant }}-ghost-full
           if-no-files-found: warn
+          retention-days: 2
           path: |
             build.log
             build/out/o1s/SHA256SUMS.txt
