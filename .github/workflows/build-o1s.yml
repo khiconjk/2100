@@ -209,6 +209,26 @@ jobs:
           ls -l toolchain/mkdtimg toolchain/avb/avbtool.py
           ls -la toolchain/mkbootimg | head || true
 
+      - name: Prepare KernelSU-Next
+        if: matrix.ksu == 'y'
+        run: |
+          set -euxo pipefail
+          echo "===== PREPARE KERNELSU-NEXT ====="
+          if [ ! -f "KernelSU-Next/kernel/Kconfig" ] || [ ! -d "KernelSU-Next/.git" ]; then
+            rm -rf KernelSU-Next
+            git clone https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next
+            (
+              cd KernelSU-Next
+              git checkout c49a6316c556f84b8e21ef3af3e1b49032b47ea0
+            )
+          fi
+          (
+            cd KernelSU-Next
+            echo "KSU Commit: $(git rev-parse HEAD)"
+            echo "KSU Tag: $(git describe --tags --abbrev=0 2>/dev/null || echo 'none')"
+            echo "KSU Revision Count: $(git rev-list --count HEAD 2>/dev/null || echo 'none')"
+          )
+
       - name: Cache clang
         uses: actions/cache@v5
         with:
