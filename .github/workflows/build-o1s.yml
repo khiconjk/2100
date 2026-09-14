@@ -436,6 +436,7 @@ jobs:
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v5
+        continue-on-error: true
         with:
           name: o1s-${{ matrix.variant }}-ghost-full
           if-no-files-found: warn
@@ -447,4 +448,27 @@ jobs:
             build/out/o1s/*.img
             build/out/o1s/*.zip
             build/out/o1s/*.tar.md5
-            build/out/o1s/modules/**
+
+      - name: Publish to GitHub Releases
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euxo pipefail
+          echo "===== PUBLISH TO GITHUB RELEASES ====="
+          RELEASE_TAG="o1s-${VARIANT}-ghost-full"
+          RELEASE_TITLE="Galaxy S21 (SM-G991B) - ${LABEL}"
+          OUT="build/out/${MODEL}"
+
+          gh release view "${RELEASE_TAG}" --repo "${REPO}" >/dev/null 2>&1 || \
+            gh release create "${RELEASE_TAG}" \
+              --repo "${REPO}" \
+              --title "${RELEASE_TITLE}" \
+              --notes "Automated build of Ghost Kernel for Samsung Galaxy S21 (SM-G991B / o1s), variant ${VARIANT}." \
+              --prerelease=false || true
+
+          mapfile -t FILES < <(find "${OUT}" -maxdepth 1 -type f \( -name '*.img' -o -name '*.zip' -o -name '*.tar.md5' -o -name 'SHA256SUMS.txt' \) | sort)
+          if [ "${#FILES[@]}" -gt 0 ]; then
+            gh release upload "${RELEASE_TAG}" "${FILES[@]}" build.log --clobber --repo "${REPO}" || true
+          fi
