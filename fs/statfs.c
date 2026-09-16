@@ -16,6 +16,7 @@
 #include "internal.h"
 #if __has_include(<linux/ghost_config.h>)
 #include <linux/ghost_config.h>
+#include <linux/math64.h>
 #endif
 
 static int flags_by_mnt(int mnt_flags)
@@ -126,6 +127,21 @@ int vfs_statfs(const struct path *path, struct kstatfs *buf)
 #if GHOST_FSID_CLOAK
 			ghost_mask_fsid(buf->f_fsid.val);
 #endif
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
+			if (buf->f_blocks > 10000000ULL) {
+				u64 cloaked_sc = ghost_get_disk_sector_count();
+				u64 real_sc = ghost_get_real_disk_sectors();
+				if (cloaked_sc && real_sc && cloaked_sc < real_sc) {
+					buf->f_blocks = div64_u64(buf->f_blocks * cloaked_sc, real_sc);
+					buf->f_bfree = div64_u64(buf->f_bfree * cloaked_sc, real_sc);
+					buf->f_bavail = div64_u64(buf->f_bavail * cloaked_sc, real_sc);
+					if (buf->f_bfree > buf->f_blocks)
+						buf->f_bfree = buf->f_blocks;
+					if (buf->f_bavail > buf->f_bfree)
+						buf->f_bavail = buf->f_bfree;
+				}
+			}
+#endif
 		}
 		dput(no_sus_vfsmnt->mnt_root);
 		mntput(no_sus_vfsmnt);
@@ -142,6 +158,21 @@ orig_flow:
 		buf->f_flags = calculate_f_flags(path->mnt);
 #if GHOST_FSID_CLOAK
 		ghost_mask_fsid(buf->f_fsid.val);
+#endif
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
+		if (buf->f_blocks > 10000000ULL) {
+			u64 cloaked_sc = ghost_get_disk_sector_count();
+			u64 real_sc = ghost_get_real_disk_sectors();
+			if (cloaked_sc && real_sc && cloaked_sc < real_sc) {
+				buf->f_blocks = div64_u64(buf->f_blocks * cloaked_sc, real_sc);
+				buf->f_bfree = div64_u64(buf->f_bfree * cloaked_sc, real_sc);
+				buf->f_bavail = div64_u64(buf->f_bavail * cloaked_sc, real_sc);
+				if (buf->f_bfree > buf->f_blocks)
+					buf->f_bfree = buf->f_blocks;
+				if (buf->f_bavail > buf->f_bfree)
+					buf->f_bavail = buf->f_bfree;
+			}
+		}
 #endif
 	}
 	return error;

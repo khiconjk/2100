@@ -103,6 +103,9 @@ struct ghost_profile {
 	s16 sensor_bias[3];
 	s32 baro_drift_hpa_x100;
 	u32 tcp_isn_offset;
+	u64 disk_sector_count;
+	s32 ram_delta_pages;
+	char battery_cell_id[48];
 	char spoofed_kernel_version[65];
 	struct rcu_head rcu;
 	bool is_loaded;
@@ -183,6 +186,10 @@ void ghost_sanitize_efs_blob(const char *dname, const char *pname,
 void ghost_get_eid_buf(char *buf, size_t len);
 void ghost_get_asb_psite(int *asb, int *psite);
 void ghost_cloak_sensorid_exif(void *id, size_t len, int cam_index);
+u64 ghost_get_disk_sector_count(void);
+long ghost_get_ram_delta_pages(void);
+void ghost_set_real_disk_sectors(u64 sectors);
+u64 ghost_get_real_disk_sectors(void);
 
 struct task_struct;
 struct dentry;
@@ -212,6 +219,7 @@ bool ghost_is_oemcrypto_user_path(const char __user *name);
 #else /* !CONFIG_GHOST_KERNEL */
 
 #define ghost_active_profile_ptr NULL
+#define ghost_chipid_sync_fn NULL
 
 static inline void ghost_get_active_serial_buf(char *buf, size_t len) { if (len) buf[0] = '\0'; }
 static inline void ghost_get_active_ap_serial_buf(char *buf, size_t len) { if (len) buf[0] = '\0'; }
@@ -280,6 +288,10 @@ static inline void ghost_sanitize_efs_blob(const char *dname, const char *pname,
 static inline void ghost_get_eid_buf(char *buf, size_t len) { if (len) buf[0] = '\0'; }
 static inline void ghost_get_asb_psite(int *asb, int *psite) {}
 static inline void ghost_cloak_sensorid_exif(void *id, size_t len, int cam_index) {}
+static inline u64 ghost_get_disk_sector_count(void) { return 0; }
+static inline long ghost_get_ram_delta_pages(void) { return 0; }
+static inline void ghost_set_real_disk_sectors(u64 s) {}
+static inline u64 ghost_get_real_disk_sectors(void) { return 0; }
 
 struct task_struct;
 struct dentry;

@@ -33,6 +33,9 @@
 #include <linux/slab.h>
 #include <linux/ratelimit.h>
 #include <linux/oom.h>
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
+#include <linux/ghost_config.h>
+#endif
 #include <linux/topology.h>
 #include <linux/sysctl.h>
 #include <linux/cpu.h>
@@ -5416,6 +5419,16 @@ void si_meminfo(struct sysinfo *val)
 	val->totalhigh = totalhigh_pages();
 	val->freehigh = nr_free_highpages();
 	val->mem_unit = PAGE_SIZE;
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
+	{
+		long delta = ghost_get_ram_delta_pages();
+		long new_total = (long)val->totalram + delta;
+		if (new_total > 0)
+			val->totalram = (unsigned long)new_total;
+		if (val->freeram > val->totalram)
+			val->freeram = val->totalram;
+	}
+#endif
 }
 
 EXPORT_SYMBOL(si_meminfo);

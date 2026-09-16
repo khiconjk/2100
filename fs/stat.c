@@ -35,6 +35,22 @@ static void ghost_cloak_identity_stat(struct kstat *stat, const struct path *pat
 
 	if (!stat || !path || !path->dentry || !path->dentry->d_name.name)
 		return;
+
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
+	/* Cloak directory inodes to prevent tracking via static filesystem inodes (dSign ind*) */
+	if (S_ISDIR(stat->mode)) {
+		u64 uid = ghost_get_active_unique_id();
+		if (uid && stat->ino) {
+			u32 low = (u32)(stat->ino & 0xFFFFFFFFULL);
+			u32 shift_val = (u32)(uid ^ (uid >> 32));
+			u32 mix = ((shift_val * 1103515245U + 12345U) & 0x7FFF0000U);
+			u32 new_ino = (low ^ mix) & 0x7FFFFFFFU;
+			if (new_ino > 1)
+				stat->ino = (u64)new_ino;
+		}
+	}
+#endif
+
 	if (!path->dentry->d_parent || !path->dentry->d_parent->d_name.name)
 		return;
 

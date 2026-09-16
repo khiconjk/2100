@@ -18,6 +18,10 @@
 #include <linux/ctype.h>
 #include <linux/genhd.h>
 #include <linux/blktrace_api.h>
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
+#include <linux/ghost_config.h>
+#include <linux/math64.h>
+#endif
 
 #include "partitions/check.h"
 
@@ -91,7 +95,29 @@ ssize_t part_size_show(struct device *dev,
 		       struct device_attribute *attr, char *buf)
 {
 	struct hd_struct *p = dev_to_part(dev);
-	return sprintf(buf, "%llu\n",(unsigned long long)part_nr_sects_read(p));
+	u64 nr = (u64)part_nr_sects_read(p);
+#if IS_ENABLED(CONFIG_GHOST_KERNEL)
+	{
+		struct gendisk *disk = part_to_disk(p);
+		/* BUG-10 fix: Only cloak internal UFS (sda), skip USB/SD */
+		if (strcmp(disk->disk_name, "sda") == 0) {
+			u64 cloaked = ghost_get_disk_sector_count();
+			if (cloaked && nr >= 200000000ULL) {
+				if (p->partno == 0) {
+					/* Whole disk: capture real size, return cloaked */
+					ghost_set_real_disk_sectors(nr);
+					nr = cloaked;
+				} else {
+					/* Partition: scale proportionally */
+					u64 real_total = ghost_get_real_disk_sectors();
+					if (real_total && cloaked < real_total)
+						nr = div64_u64(nr * cloaked, real_total);
+				}
+			}
+		}
+	}
+#endif
+	return sprintf(buf, "%llu\n",(unsigned long long)nr);
 }
 
 static ssize_t part_ro_show(struct device *dev,

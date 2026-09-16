@@ -11,6 +11,7 @@
 *.dts.dtout
 *.dts.reverse.dts
 
+# Ignore build and packaging artifacts
 build/out
 toolchain
 AnyKernel3
@@ -28,6 +29,14 @@ AnyKernel3/
 out/
 modules/
 ghost-uptime-v100-project-handoff/
+
+# Temporary test artifacts
+*.png
+*.jpg
+*.jpeg
+device_identity_snapshot*
+scratch_db/
+show_errors_and_validate.*
 .scmversion
 Image
 boot_ramdisk

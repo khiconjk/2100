@@ -320,6 +320,15 @@ static void ghost_fill_unique_from_seed(struct ghost_profile *p, u64 seed)
 	if (!ufsmix)
 		ufsmix = 1ULL;
 	snprintf(p->ufs_serial, sizeof(p->ufs_serial), "0x%08llx", ufsmix);
+	{
+		static const char * const ufs_models[] = {
+			"KLUDG8UHDB-C2D1",
+			"KM2V7001CM-B706",
+			"THGJFGT1E45BAIL"
+		};
+		strscpy(p->ufs_model, ufs_models[ghost_mix64(seed, 0x5546534DULL) % 3],
+			sizeof(p->ufs_model));
+	}
 
 	dmix[0] = ghost_mix64(seed, 0x44524D30ULL);
 	dmix[1] = ghost_mix64(seed, 0x44524D31ULL);
@@ -344,6 +353,16 @@ static void ghost_fill_unique_from_seed(struct ghost_profile *p, u64 seed)
 	p->sensor_bias[2] = (s16)((s32)((senmix >> 16) % 41ULL) - 20);
 	p->baro_drift_hpa_x100 = (s32)((ghost_mix64(seed, 0xBA20ULL) % 81ULL) - 40);
 	p->tcp_isn_offset = (u32)ghost_mix64(seed, 0x15E0ULL);
+
+	p->disk_sector_count = 249856000ULL + ((ghost_mix64(seed, 0x4449534BULL) % 1024ULL) * 8ULL);
+	p->ram_delta_pages = (s32)(ghost_mix64(seed, 0x52414D30ULL) % 1024ULL) - 512;
+	{
+		u64 b1 = ghost_mix64(seed, 0x42415454ULL);
+		u64 b2 = ghost_mix64(seed, 0x42415455ULL);
+		snprintf(p->battery_cell_id, sizeof(p->battery_cell_id),
+			 "GH43-05054A+SEC%06llu+%06llu",
+			 (b1 % 1000000ULL), (b2 % 1000000ULL));
+	}
 }
 
 static bool is_valid_samsung_serial(const char *sn)
@@ -1004,6 +1023,7 @@ static void ghost_inplace_copy(char *buf, size_t len, const char *key,
 			       const char *val, size_t vlen)
 {
 	char *p;
+	char *end;
 
 	if (!buf || !key || !val || vlen == 0)
 		return;
@@ -1012,6 +1032,12 @@ static void ghost_inplace_copy(char *buf, size_t len, const char *key,
 		return;
 	p += strlen(key);
 	if (p + vlen > buf + len)
+		return;
+	/* BUG-09 fix: verify the existing value is at least vlen chars
+	 * before the next delimiter (space, null, or end-of-buffer).
+	 * This prevents overwriting adjacent boot parameters. */
+	end = p + vlen;
+	if (end < buf + len && *end != ' ' && *end != '\0' && *end != '\n')
 		return;
 	memcpy(p, val, vlen);
 }
@@ -1073,8 +1099,10 @@ void ghost_sanitize_bootargs(char *buf, size_t len)
 		ghost_inplace_copy(buf, len, "androidboot.ap_serial=", snap.ap_serial, 14);
 	if (snap.em_did[0] && strlen(snap.em_did) == 16)
 		ghost_inplace_copy(buf, len, "androidboot.em.did=", snap.em_did, 16);
-	ghost_inplace_copy(buf, len, "androidboot.version.security_patch=", "2024-08-01", 10);
-	ghost_inplace_copy(buf, len, "androidboot.security_patch=", "2024-08-01", 10);
+	if (snap.security_patch[0] && strlen(snap.security_patch) == 10) {
+		ghost_inplace_copy(buf, len, "androidboot.version.security_patch=", snap.security_patch, 10);
+		ghost_inplace_copy(buf, len, "androidboot.security_patch=", snap.security_patch, 10);
+	}
 
 #if !GHOST_CMDLINE_CLOAK
 	return;
@@ -1182,6 +1210,7 @@ static void ghost_set_default_profile(struct ghost_profile *p)
 	if (!p)
 		p = &ghost_active_profile;
 
+	memset(p, 0, sizeof(*p));
 	strscpy(p->model, "SM-G991B", sizeof(p->model));
 	strscpy(p->product, "o1sxeea", sizeof(p->product));
 	strscpy(p->device, "o1s", sizeof(p->device));
@@ -1219,6 +1248,9 @@ static void ghost_set_default_profile(struct ghost_profile *p)
 
 	strscpy(p->ufs_serial, "0x9f80c169", sizeof(p->ufs_serial));
 	strscpy(p->ufs_model, "KLUDG8UHDB-C2D1", sizeof(p->ufs_model));
+	p->disk_sector_count = 249864192ULL;
+	p->ram_delta_pages = 0;
+	strscpy(p->battery_cell_id, "GH43-05054A+SEC585047+457597", sizeof(p->battery_cell_id));
 
 	strscpy(p->boot_hash, "7207368a4caca12d62f0382e67932c38f78c6d0b3f9bd7f5967825461b4172c1", sizeof(p->boot_hash));
 	strscpy(p->boot_key, "22defff599279ee456bbae21e65c2623cf87660f8eb8cb50d91d5879d703a781", sizeof(p->boot_key));
@@ -1291,7 +1323,10 @@ static bool ghost_is_unique_conf_key(const char *k)
 	       !strcasecmp(k, "imsi") || !strcasecmp(k, "imsi2") ||
 	       !strcasecmp(k, "iccid") || !strcasecmp(k, "iccid2") ||
 	       !strcasecmp(k, "wifi_mac") || !strcasecmp(k, "bt_mac") ||
-	       !strcasecmp(k, "ufs_serial") ||
+	       !strcasecmp(k, "ufs_serial") || !strcasecmp(k, "ufs_model") ||
+	       !strcasecmp(k, "battery_cell_id") || !strcasecmp(k, "batt_qr") ||
+	       !strcasecmp(k, "disk_sector_count") || !strcasecmp(k, "disk_size") ||
+	       !strcasecmp(k, "ram_delta_pages") ||
 	       !strcasecmp(k, "device_unique_id") || !strcasecmp(k, "deviceuniqueid") ||
 	       !strcasecmp(k, "uptime_days") || !strcasecmp(k, "boot_count") ||
 	       !strcasecmp(k, "battery_cycle") || !strcasecmp(k, "battery_health") ||
@@ -1653,6 +1688,30 @@ static int parse_config_buffer(char *buf, size_t len, const char *source_path)
 			strscpy(temp_prof->ufs_serial, k_val, sizeof(temp_prof->ufs_serial));
 		} else if (!strcasecmp(k_key, "ufs_model")) {
 			strscpy(temp_prof->ufs_model, k_val, sizeof(temp_prof->ufs_model));
+		} else if (!strcasecmp(k_key, "battery_cell_id") || !strcasecmp(k_key, "batt_qr")) {
+			if (strlen(k_val) != 28) {
+				pr_warn("GhostKernel: battery_cell_id '%s' must be exactly 28 chars in %s\n",
+					k_val, source_path);
+			} else {
+				strscpy(temp_prof->battery_cell_id, k_val, sizeof(temp_prof->battery_cell_id));
+			}
+		} else if (!strcasecmp(k_key, "disk_sector_count") || !strcasecmp(k_key, "disk_size")) {
+			u64 sc = 0;
+			if (kstrtoull(k_val, 10, &sc) != 0 || sc < 200000000ULL || sc > 1000000000ULL) {
+				pr_warn("GhostKernel: Invalid disk_sector_count '%s' in %s\n", k_val, source_path);
+				kfree(temp_prof);
+				return -EINVAL;
+			}
+			temp_prof->disk_sector_count = sc;
+		} else if (!strcasecmp(k_key, "ram_delta_pages")) {
+			int delta = 0;
+			if (kstrtoint(k_val, 10, &delta) != 0 || delta < -2048 || delta > 2048) {
+				pr_warn("GhostKernel: Invalid ram_delta_pages '%s' (range -2048..2048) in %s\n",
+					k_val, source_path);
+				kfree(temp_prof);
+				return -EINVAL;
+			}
+			temp_prof->ram_delta_pages = delta;
 		} else if (!strcasecmp(k_key, "device_unique_id") || !strcasecmp(k_key, "deviceuniqueid")) {
 			if (strlen(k_val) == 64 && ghost_hex2bin(temp_prof->device_unique_id_bytes, k_val, 32) == 0) {
 				strscpy(temp_prof->device_unique_id, k_val, sizeof(temp_prof->device_unique_id));
@@ -1960,6 +2019,9 @@ static int ghost_config_proc_show(struct seq_file *m, void *v)
 		   p->bt_mac[0], p->bt_mac[1], p->bt_mac[2],
 		   p->bt_mac[3], p->bt_mac[4], p->bt_mac[5]);
 	seq_printf(m, "UFS Serial/Model  : %s / %s\n", p->ufs_serial, p->ufs_model);
+	seq_printf(m, "Battery Cell ID   : %s\n", p->battery_cell_id);
+	seq_printf(m, "Disk Sector Count : %llu\n", (unsigned long long)p->disk_sector_count);
+	seq_printf(m, "RAM Delta (Pages) : %d\n", p->ram_delta_pages);
 	seq_printf(m, "Uptime Age (Days) : %u days\n", p->uptime_days);
 	seq_printf(m, "Boot Count        : %u\n", p->boot_count);
 	seq_printf(m, "Battery Cycle     : %u (Health: %u%%)\n", p->battery_cycle, p->battery_health);
@@ -2124,9 +2186,14 @@ static void ghost_apply_epoch(const u8 *uuid)
 	old_prof = rcu_dereference_protected(ghost_active_profile_ptr,
 			lockdep_is_held(&ghost_config_mutex));
 	rcu_assign_pointer(ghost_active_profile_ptr, new_prof);
-	memcpy(&ghost_active_profile, new_prof, sizeof(*new_prof));
 	mutex_unlock(&ghost_config_mutex);
 	mutex_unlock(&ghost_reload_mutex);
+
+	/* BUG-14 fix: Wait for all RCU readers to finish before updating
+	 * the static ghost_active_profile copy. Previously, readers holding
+	 * rcu_read_lock() could see torn data during memcpy. */
+	synchronize_rcu();
+	memcpy(&ghost_active_profile, new_prof, sizeof(*new_prof));
 
 	if (old_prof && old_prof != &ghost_active_profile) {
 		synchronize_rcu();
@@ -3064,17 +3131,72 @@ EXPORT_SYMBOL(ghost_get_ids_values);
 
 void ghost_get_batt_qr_buf(char *buf, size_t len)
 {
-	u64 uid = ghost_get_active_unique_id();
-	u64 mix = ghost_mix64(uid, 0xBA770001ULL);
+	struct ghost_profile *p;
+	u64 uid;
+	u64 mix;
 	u32 a, b;
 
 	if (!buf || len < 29)
 		return;
+	buf[0] = '\0';
+	rcu_read_lock();
+	p = rcu_dereference(ghost_active_profile_ptr);
+	if (p && p->battery_cell_id[0])
+		strscpy(buf, p->battery_cell_id, len);
+	rcu_read_unlock();
+	if (buf[0])
+		return;
+
+	uid = ghost_get_active_unique_id();
+	mix = ghost_mix64(uid, 0xBA770001ULL);
 	a = (u32)(mix % 1000000ULL);
 	b = (u32)((mix >> 20) % 1000000ULL);
 	snprintf(buf, len, "GH43-05054A+SEC%06u+%06u", a, b);
 }
 EXPORT_SYMBOL(ghost_get_batt_qr_buf);
+
+u64 ghost_get_disk_sector_count(void)
+{
+	struct ghost_profile *p;
+	u64 val = 249864192ULL;
+
+	rcu_read_lock();
+	p = rcu_dereference(ghost_active_profile_ptr);
+	if (p && p->disk_sector_count)
+		val = p->disk_sector_count;
+	rcu_read_unlock();
+	return val;
+}
+EXPORT_SYMBOL(ghost_get_disk_sector_count);
+
+long ghost_get_ram_delta_pages(void)
+{
+	struct ghost_profile *p;
+	long delta = 0;
+
+	rcu_read_lock();
+	p = rcu_dereference(ghost_active_profile_ptr);
+	if (p)
+		delta = (long)p->ram_delta_pages;
+	rcu_read_unlock();
+	return delta;
+}
+EXPORT_SYMBOL(ghost_get_ram_delta_pages);
+
+static u64 ghost_real_disk_sectors;
+
+void ghost_set_real_disk_sectors(u64 sectors)
+{
+	if (!ghost_real_disk_sectors && sectors > 0)
+		ghost_real_disk_sectors = sectors;
+}
+EXPORT_SYMBOL(ghost_set_real_disk_sectors);
+
+u64 ghost_get_real_disk_sectors(void)
+{
+	return ghost_real_disk_sectors;
+}
+EXPORT_SYMBOL(ghost_get_real_disk_sectors);
 
 void ghost_get_pcb_buf(char *buf, size_t len)
 {
